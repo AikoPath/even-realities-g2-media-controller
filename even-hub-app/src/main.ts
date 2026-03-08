@@ -180,7 +180,15 @@ async function main() {
     addLog('RAW', JSON.stringify(event.jsonData ?? {}))
     addLog('EVENT', `parsed eventType=${eventType} (CLICK=${OsEventTypeList.CLICK_EVENT} DOUBLE=${OsEventTypeList.DOUBLE_CLICK_EVENT} SCROLL_T=${OsEventTypeList.SCROLL_TOP_EVENT} SCROLL_B=${OsEventTypeList.SCROLL_BOTTOM_EVENT})`)
 
-    if (eventType === undefined) return
+    // Firmware sends single tap as empty evenHubEvent (no eventType).
+    // Treat undefined eventType with empty payload as CLICK_EVENT.
+    if (eventType === undefined) {
+      const action = isPlaying ? 'pause' : 'play'
+      addLog('ACTION', `${action} (single tap)`)
+      await sendCommand(action)
+      await updateDisplay(bridge)
+      return
+    }
 
     const now = Date.now()
 
