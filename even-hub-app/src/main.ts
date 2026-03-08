@@ -1,8 +1,13 @@
 import {
   waitForEvenAppBridge,
   CreateStartUpPageContainer,
+  RebuildPageContainer,
   TextContainerUpgrade,
   TextContainerProperty,
+  ListContainerProperty,
+  ListItemContainerProperty,
+  ImageContainerProperty,
+  ImageRawDataUpdate,
   OsEventTypeList,
   StartUpPageCreateResult,
   type EvenHubEvent,
@@ -62,19 +67,34 @@ let title = 'No media'
 let artist = ''
 let volume = 0
 let maxVolume = 160
+let position = 0
+let duration = 0
 let lastScrollTime = 0
+let lastArtUrl = ''
 let bridgeOnline = false
 
 // ── Bridge communication ──
+interface StatusResponse {
+  playing: boolean
+  title: string
+  artist: string
+  volume: number
+  maxVolume: number
+  position: number
+  duration: number
+}
+
 function updateStateFromResponse(data: any): void {
   if (data.playing !== undefined) isPlaying = data.playing
   if (data.title) title = data.title
   if (data.artist !== undefined) artist = data.artist
   if (data.volume !== undefined) volume = data.volume
   if (data.maxVolume !== undefined) maxVolume = data.maxVolume
+  if (data.position !== undefined) position = data.position
+  if (data.duration !== undefined) duration = data.duration
 }
 
-async function sendCommand(cmd: MediaCommand): Promise<any> {
+async function sendCommand(cmd: MediaCommand): Promise<StatusResponse | null> {
   try {
     const res = await fetch(`${BRIDGE_URL}/${cmd}`, { method: 'POST' })
     if (res.ok) {
@@ -95,6 +115,20 @@ async function sendCommand(cmd: MediaCommand): Promise<any> {
   return null
 }
 
+async function sendSeek(pos: number): Promise<void> {
+  try {
+    const res = await fetch(`${BRIDGE_URL}/seek?pos=${Math.round(pos)}`, { method: 'POST' })
+    position = pos
+    if (res.ok) {
+      const data = await res.json()
+      updateStateFromResponse(data)
+      setBridgeStatus(true)
+    }
+  } catch (e) {
+    log(`seek: ${e}`, 'error')
+  }
+}
+
 async function sendVolSet(vol: number): Promise<void> {
   try {
     const res = await fetch(`${BRIDGE_URL}/vol-set?v=${vol}`, { method: 'POST' })
@@ -109,26 +143,56 @@ async function sendVolSet(vol: number): Promise<void> {
   }
 }
 
-// ── Formatting ──
+// ── Formatting helpers ──
+function formatTime(ms: number): string {
+  const totalSec = Math.floor(ms / 1000)
+  const min = Math.floor(totalSec / 60)
+  const sec = totalSec % 60
+  return `${min}:${sec.toString().padStart(2, '0')}`
+}
+
+function buildBar(fraction: number, width: number = 12): string {
+  const clamped = Math.max(0, Math.min(1, fraction))
+  const filled = Math.round(clamped * width)
+  return '\u2588'.repeat(filled) + '\u2591'.repeat(width - filled)
+}
+
 function volumePercent(): number {
   if (maxVolume <= 0) return 0
   return Math.min(100, Math.round((volume / maxVolume) * 100))
+}
+
+function volumeFraction(): number {
+  return maxVolume > 0 ? Math.min(1, volume / maxVolume) : 0
+}
+
+function seekFraction(): number {
+  return duration > 0 ? Math.min(position / duration, 1) : 0
 }
 
 function volumeStep(): number {
   return Math.max(1, Math.round(maxVolume / 20))
 }
 
+// ── Glasses display text ──
+// This is the proven working format: single full-screen text container
 function buildDisplayText(): string {
   const state = isPlaying ? '\u25B6' : '\u23F8'
   const vol = volumePercent()
-  return `${state} ${title}\n${artist}\n\nTap: Play/Pause\nDouble tap: Next\nScroll: Volume ${vol}%`
+  return [
+    `${state} ${title}`,
+    artist ? artist : '',
+    '',
+    'Tap: Play/Pause',
+    'Double tap: Next',
+    `Scroll: Volume ${vol}%`,
+  ].filter(l => l !== '' || true).join('\n')
 }
 
-// ── Display update via textContainerUpgrade ──
-async function updateGlassesText(bridge: EvenAppBridge): Promise<void> {
+// ── Display update (text upgrade only — no rebuild needed) ──
+async function updateDisplay(bridge: EvenAppBridge): Promise<void> {
   try {
-    await bridge.textContainerUpgrade(
+    const ok = await bridge.textContainerUpgrade(
       new TextContainerUpgrade({
         containerID: 1,
         containerName: 'media-info',
@@ -137,14 +201,16 @@ async function updateGlassesText(bridge: EvenAppBridge): Promise<void> {
         content: buildDisplayText(),
       })
     )
+    log(`[DBG] textContainerUpgrade: ${ok}`)
   } catch (e) {
-    log(`updateGlassesText error: ${e}`, 'error')
+    log(`updateDisplay error: ${e}`, 'error')
   }
 }
 
-// ── Event handling (text mode only) ──
-// Firmware event types observed from hardware (different from SDK enum!):
-//   0 = unknown/empty, 1 = single tap, 2 = scroll, 3 = double tap
+// ── Event handling ──
+// Hardware event types observed from actual glasses (different from SDK enum!):
+// SDK enum:  CLICK=0, SCROLL_TOP=1, SCROLL_BOTTOM=2, DOUBLE_CLICK=3
+// Hardware:  tap=1,   scroll=2,      (no separate dir), double-tap=3
 const HW_TAP = 1
 const HW_SCROLL = 2
 const HW_DOUBLE_TAP = 3
@@ -154,6 +220,7 @@ async function handleEvent(
   eventType: number,
 ): Promise<void> {
   const now = Date.now()
+  log(`handleEvent: type=${eventType}`)
 
   if (eventType === HW_DOUBLE_TAP) {
     await sendCommand('next')
@@ -161,14 +228,14 @@ async function handleEvent(
     await sendCommand(isPlaying ? 'pause' : 'play')
   } else if (eventType === HW_SCROLL && now - lastScrollTime > SCROLL_COOLDOWN_MS) {
     lastScrollTime = now
-    // Scroll events don't indicate direction — toggle volume up
-    // TODO: figure out scroll direction once basic controls work
-    await sendVolSet(Math.min(maxVolume, volume + volumeStep()))
+    const step = volumeStep()
+    const newVol = Math.min(maxVolume, volume + step)
+    await sendVolSet(newVol)
   } else {
     return
   }
 
-  await updateGlassesText(bridge)
+  await updateDisplay(bridge)
 }
 
 // ── Main ──
@@ -187,67 +254,76 @@ async function main() {
     log('Initial status fetch failed - bridge may be offline', 'warn')
   }
 
-  // Create startup page — shut down stale page first if needed
-  const startupPage = new CreateStartUpPageContainer({
+  // Create startup page — single full-screen text container
+  // This is the PROVEN WORKING structure from before the UI rework
+  const textContainer = new TextContainerProperty({
+    containerID: 1,
+    containerName: 'media-info',
+    xPosition: 0,
+    yPosition: 0,
+    width: 576,
+    height: 288,
+    content: buildDisplayText(),
+    isEventCapture: 1,
+    borderWidth: 0,
+  })
+
+  const startupPayload = new CreateStartUpPageContainer({
     containerTotalNum: 1,
-    textObject: [new TextContainerProperty({
-      containerID: 1,
-      containerName: 'media-info',
-      xPosition: 0, yPosition: 0, width: 576, height: 288,
-      content: buildDisplayText(),
-      isEventCapture: 1,
-      borderWidth: 0,
-    })],
+    textObject: [textContainer],
   })
 
   const resultNames = ['success', 'invalid', 'oversize', 'outOfMemory']
   let createResult: number
   try {
-    createResult = await bridge.createStartUpPageContainer(startupPage)
+    createResult = await bridge.createStartUpPageContainer(startupPayload)
   } catch (e) {
-    log(`createStartUpPageContainer threw: ${e}`, 'error')
+    log(`[DBG] createStartUpPageContainer threw: ${e}`, 'error')
     createResult = -1
   }
   log(`createStartUpPageContainer: ${resultNames[createResult] ?? createResult} (raw=${createResult})`)
 
-  // "invalid" means page exists from previous session — that's fine, reuse it
-  if (createResult === StartUpPageCreateResult.invalid) {
+  if (createResult === StartUpPageCreateResult.success) {
+    log('Startup page created OK')
+  } else if (createResult === StartUpPageCreateResult.invalid) {
+    // Page exists from previous session — reuse it, update text
     log('Page exists from previous session — reusing')
-    await updateGlassesText(bridge)
-  }
-
-  if (createResult === StartUpPageCreateResult.success || createResult === StartUpPageCreateResult.invalid) {
-    log('Glasses display ready')
-    setGlassesStatus('Glasses connected', 'green')
+    await updateDisplay(bridge)
   } else {
-    log(`Page creation failed: ${resultNames[createResult] ?? createResult}`, 'error')
-    setGlassesStatus('Glasses error', 'red')
+    log(`STARTUP FAILED: ${resultNames[createResult] ?? createResult}`, 'error')
+    setGlassesStatus(`Startup failed: ${resultNames[createResult] ?? createResult}`, 'red')
+    return
   }
 
-  // Event handler — text mode only
+  setGlassesStatus('Glasses connected', 'green')
+
+  // Event handler
   bridge.onEvenHubEvent(async (event: EvenHubEvent) => {
     try {
-      const le = event.listEvent
       const te = event.textEvent
       const se = event.sysEvent
-      log(`[RAW] list=${JSON.stringify(le)} text=${JSON.stringify(te)} sys=${JSON.stringify(se)} json=${JSON.stringify(event.jsonData ?? {}).slice(0, 300)}`)
-      const eventType = te?.eventType ?? se?.eventType ?? le?.eventType
-      if (eventType === undefined) return
-      log(`Event: type=${eventType}`)
+
+      log(`Event: text=${!!te} sys=${!!se} raw=${JSON.stringify(event.jsonData ?? {}).slice(0, 200)}`)
+
+      const eventType = te?.eventType ?? se?.eventType
+      if (eventType === undefined) {
+        log('No eventType found, ignoring', 'warn')
+        return
+      }
       await handleEvent(bridge, eventType)
     } catch (e) {
-      log(`Event error: ${e}`, 'error')
+      log(`Event handler error: ${e}`, 'error')
     }
   })
 
-  // Periodic status poll — update glasses when track/volume changes
+  // Periodic status poll
   setInterval(async () => {
     const oldTitle = title
     const oldArtist = artist
     const oldVol = volume
     await sendCommand('status')
     if (title !== oldTitle || artist !== oldArtist || volume !== oldVol) {
-      await updateGlassesText(bridge)
+      await updateDisplay(bridge)
     }
   }, 5000)
 }
