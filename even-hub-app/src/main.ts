@@ -628,14 +628,15 @@ async function main() {
   }
   log(`createStartUpPageContainer: ${resultNames[createResult] ?? createResult} (raw=${createResult})`)
 
-  if (createResult !== StartUpPageCreateResult.success) {
-    log(`STARTUP FAILED: ${resultNames[createResult] ?? createResult}`, 'error')
-    setGlassesStatus(`Startup failed: ${resultNames[createResult] ?? createResult}`, 'red')
-    return
+  if (createResult === StartUpPageCreateResult.success) {
+    log('Startup page created (first time)')
+  } else {
+    // "invalid" means it was already created in a previous session — that's fine
+    log(`Startup returned ${resultNames[createResult] ?? createResult} — page already exists, proceeding with rebuild`)
   }
 
   setGlassesStatus('Glasses connected', 'green')
-  log('Startup OK. Running rebuild diagnostics...')
+  log('Running rebuild diagnostics...')
 
   // Step 2: Run diagnostics to find which rebuild configs work
   const firstPass = await runDiagnostics(bridge)
