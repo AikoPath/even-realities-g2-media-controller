@@ -165,7 +165,7 @@ function formatTime(ms: number): string {
 function buildBar(fraction: number, width: number = 12): string {
   const clamped = Math.max(0, Math.min(1, fraction))
   const filled = Math.round(clamped * width)
-  return '\u2588'.repeat(filled) + '\u2591'.repeat(width - filled)
+  return '#'.repeat(filled) + '-'.repeat(width - filled)
 }
 
 function volumePercent(): number {
@@ -186,9 +186,9 @@ function volumeStep(): number {
   return Math.max(1, Math.round(maxVolume / 20))
 }
 
-// ── List item labels ──
+// ── List item labels (ASCII only — glasses firmware may reject unicode) ──
 function getListItems(): string[] {
-  const playLabel = isPlaying ? '\u23F8 Pause' : '\u25B6 Play'
+  const playLabel = isPlaying ? '|| Pause' : '> Play'
   const volBar = buildBar(volumeFraction(), 10)
   const volPct = volumePercent()
   const posStr = formatTime(position)
@@ -198,20 +198,20 @@ function getListItems(): string[] {
   return [
     centerText(`${posStr} ${seekBar} ${durStr}`),
     centerText(playLabel),
-    centerText('\u23ED Next'),
-    centerText('\u23EE Previous'),
-    centerText(`\u266B Vol ${volBar} ${volPct}%`),
+    centerText('>> Next'),
+    centerText('<< Previous'),
+    centerText(`Vol ${volBar} ${volPct}%`),
   ]
 }
 
 // ── Now-playing text ──
 function getNowPlayingText(): string {
-  const state = isPlaying ? '\u25B6' : '\u23F8'
+  const state = isPlaying ? '>' : '||'
   const line1 = `${state} ${title}`
   return artist ? `${line1}\n${artist}` : line1
 }
 
-// ── Slider mode text ──
+// ── Slider mode text (ASCII only) ──
 function getSliderText(): string {
   if (uiMode === 'volume') {
     const bar = buildBar(volumeFraction(), 20)
@@ -223,7 +223,7 @@ function getSliderText(): string {
 }
 
 // ── Page builders ──
-// Build the text + list containers used for both startup and rebuild
+// ASCII-only text — glasses firmware may reject unicode.
 function buildTextAndList() {
   const items = getListItems()
 
@@ -294,9 +294,12 @@ function buildListPage(): RebuildPageContainer {
     yPosition: 8,
     width: 472,
     height: 80,
+    borderWidth: 0,
+    borderColor: 0,
+    borderRdaius: 0,
+    paddingLength: 0,
     content: getNowPlayingText(),
     isEventCapture: 0,
-    borderWidth: 0,
   })
 
   const listContainer = new ListContainerProperty({
@@ -313,7 +316,7 @@ function buildListPage(): RebuildPageContainer {
     isEventCapture: 1,
     itemContainer: new ListItemContainerProperty({
       itemCount: items.length,
-      itemWidth: 560,
+      itemWidth: 0,
       isItemSelectBorderEn: 1,
       itemName: items,
     }),
@@ -344,9 +347,12 @@ function buildSliderPage(): RebuildPageContainer {
     yPosition: 8,
     width: 472,
     height: 80,
+    borderWidth: 0,
+    borderColor: 0,
+    borderRdaius: 0,
+    paddingLength: 0,
     content: getNowPlayingText(),
     isEventCapture: 0,
-    borderWidth: 0,
   })
 
   const sliderText = new TextContainerProperty({
@@ -356,12 +362,12 @@ function buildSliderPage(): RebuildPageContainer {
     yPosition: 96,
     width: 560,
     height: 184,
-    content: getSliderText(),
-    isEventCapture: 1,
     borderWidth: 2,
     borderColor: 12,
     borderRdaius: 6,
     paddingLength: 16,
+    content: getSliderText(),
+    isEventCapture: 1,
   })
 
   return new RebuildPageContainer({
@@ -420,7 +426,7 @@ async function rebuildDisplay(bridge: EvenAppBridge): Promise<void> {
   try {
     const page = uiMode === 'list' ? buildListPage() : buildSliderPage()
     try {
-      const json = page.toJson ? page.toJson() : page
+      const json = (page as any).toJson ? (page as any).toJson() : page
       log(`[DBG] rebuildDisplay(${uiMode}) payload: ${JSON.stringify(json).slice(0, 500)}`)
     } catch {}
     const ok = await bridge.rebuildPageContainer(page)
@@ -565,7 +571,7 @@ async function main() {
   const resultNames = ['success', 'invalid', 'oversize', 'outOfMemory']
   const startupPayload = buildStartupPage()
   try {
-    const startupJson = startupPayload.toJson ? startupPayload.toJson() : startupPayload
+    const startupJson = (startupPayload as any).toJson ? (startupPayload as any).toJson() : startupPayload
     log(`[DBG] startup payload: ${JSON.stringify(startupJson).slice(0, 500)}`)
   } catch (e) {
     log(`[DBG] could not serialize startup payload: ${e}`, 'warn')
@@ -591,7 +597,7 @@ async function main() {
       listObject: [listContainer],
     })
     try {
-      const rebuildJson = rebuildPayload.toJson ? rebuildPayload.toJson() : rebuildPayload
+      const rebuildJson = (rebuildPayload as any).toJson ? (rebuildPayload as any).toJson() : rebuildPayload
       log(`[DBG] rebuild fallback payload: ${JSON.stringify(rebuildJson).slice(0, 500)}`)
     } catch (e) {
       log(`[DBG] could not serialize rebuild payload: ${e}`, 'warn')
