@@ -3,72 +3,97 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
-    <meta http-equiv="Pragma" content="no-cache" />
-    <meta http-equiv="Expires" content="0" />
     <title>G2 Media Controller</title>
     <style>
-      * { margin: 0; padding: 0; box-sizing: border-box; }
+      * { box-sizing: border-box; margin: 0; padding: 0; }
       body {
-        font-family: -apple-system, system-ui, sans-serif;
-        background: #111; color: #eee;
-        padding: 16px; max-width: 480px; margin: 0 auto;
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+        background: #0a0a0a;
+        color: #e0e0e0;
+        padding: 16px;
+        font-size: 14px;
       }
-      h1 { font-size: 18px; margin-bottom: 12px; }
+      h1 {
+        font-size: 18px;
+        font-weight: 600;
+        margin-bottom: 16px;
+        color: #fff;
+      }
+      h2 {
+        font-size: 14px;
+        font-weight: 600;
+        margin-bottom: 8px;
+        color: #aaa;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+      }
+
+      /* Status section */
+      #status-section { margin-bottom: 20px; }
       .status-row {
-        display: flex; gap: 8px; align-items: center;
-        margin-bottom: 8px; font-size: 14px;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 6px 0;
+        border-bottom: 1px solid #1a1a1a;
       }
-      .dot {
-        width: 10px; height: 10px; border-radius: 50%;
-        display: inline-block; flex-shrink: 0;
-        background: #666;
+      .status-dot {
+        width: 10px;
+        height: 10px;
+        border-radius: 50%;
+        flex-shrink: 0;
       }
-      .dot.green { background: #4caf50; }
-      .dot.red { background: #f44336; }
-      .dot.yellow { background: #ff9800; }
-      .track-info {
-        background: #222; border-radius: 8px;
-        padding: 12px; margin: 12px 0;
+      .dot-green { background: #22c55e; }
+      .dot-red { background: #ef4444; }
+      .dot-yellow { background: #eab308; }
+      .dot-gray { background: #555; }
+      .status-label {
+        font-size: 13px;
+        color: #ccc;
       }
-      .track-title { font-size: 16px; font-weight: 600; }
-      .track-artist { font-size: 13px; color: #aaa; margin-top: 4px; }
-      #log {
-        background: #1a1a1a; border-radius: 8px;
-        padding: 8px; margin-top: 12px;
-        font-family: monospace; font-size: 11px;
-        max-height: 300px; overflow-y: auto;
-        color: #8f8; white-space: pre-wrap;
-        word-break: break-all;
+
+      /* Log section */
+      #log-section { margin-top: 12px; }
+      #log-list {
+        max-height: 50vh;
+        overflow-y: auto;
+        font-family: 'SF Mono', 'Fira Code', monospace;
+        font-size: 11px;
+        line-height: 1.6;
+        color: #888;
+        background: #111;
+        border-radius: 8px;
+        padding: 8px 10px;
       }
-      .log-error { color: #f66; }
-      .log-warn { color: #fa0; }
-      .section-label {
-        font-size: 12px; color: #888;
-        text-transform: uppercase; letter-spacing: 1px;
-        margin-top: 16px; margin-bottom: 4px;
-      }
+      .log-entry { border-bottom: 1px solid #1a1a1a; padding: 2px 0; }
+      .log-time { color: #555; }
+      .log-action { color: #7dd3fc; }
+      .log-detail { color: #aaa; }
     </style>
   </head>
   <body>
-    <h1>G2 Media Controller <span style="font-size:10px;color:#666">v13</span></h1>
+    <h1>G2 Media Controller</h1>
 
-    <div class="status-row">
-      <span class="dot" id="bridge-dot"></span>
-      <span id="bridge-status">Checking bridge...</span>
-    </div>
-    <div class="status-row">
-      <span class="dot" id="glasses-dot"></span>
-      <span id="glasses-status">Waiting for glasses...</span>
+    <div id="status-section">
+      <h2>Status</h2>
+      <div class="status-row" id="status-glasses">
+        <span class="status-dot dot-gray" id="dot-glasses"></span>
+        <span class="status-label" id="label-glasses">Glasses: waiting...</span>
+      </div>
+      <div class="status-row" id="status-bridge">
+        <span class="status-dot dot-gray" id="dot-bridge"></span>
+        <span class="status-label" id="label-bridge">Bridge: waiting...</span>
+      </div>
+      <div class="status-row" id="status-media">
+        <span class="status-dot dot-gray" id="dot-media"></span>
+        <span class="status-label" id="label-media">Media: waiting...</span>
+      </div>
     </div>
 
-    <div class="track-info">
-      <div class="track-title" id="track-title">--</div>
-      <div class="track-artist" id="track-artist"></div>
+    <div id="log-section">
+      <h2>Action Log</h2>
+      <div id="log-list"></div>
     </div>
-
-    <div class="section-label">Event Log</div>
-    <div id="log"></div>
 
     <script type="module" src="/src/main.ts"></script>
   </body>
