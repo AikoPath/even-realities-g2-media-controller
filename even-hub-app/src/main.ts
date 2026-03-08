@@ -130,9 +130,8 @@ async function main() {
       setStatus('glasses', 'dot-red', 'Glasses: disconnected')
     } else if (ct === 'connectionFailed') {
       setStatus('glasses', 'dot-red', 'Glasses: connection failed')
-    } else {
-      setStatus('glasses', 'dot-gray', `Glasses: ${ct}`)
     }
+    // Ignore 'none' and other unknown values — don't update UI for spurious statuses
   })
 
   // Create page
