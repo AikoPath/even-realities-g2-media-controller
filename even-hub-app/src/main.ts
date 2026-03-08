@@ -418,15 +418,17 @@ async function fetchAndSendAlbumArt(bridge: EvenAppBridge): Promise<void> {
 // ── Display update ──
 async function rebuildDisplay(bridge: EvenAppBridge): Promise<void> {
   try {
-    if (uiMode === 'list') {
-      const ok = await bridge.rebuildPageContainer(buildListPage())
-      log(`rebuildDisplay(list): ${ok}`)
-      fetchAndSendAlbumArt(bridge)
-    } else {
-      const ok = await bridge.rebuildPageContainer(buildSliderPage())
-      log(`rebuildDisplay(${uiMode}): ${ok}`)
-      fetchAndSendAlbumArt(bridge)
+    const page = uiMode === 'list' ? buildListPage() : buildSliderPage()
+    try {
+      const json = page.toJson ? page.toJson() : page
+      log(`[DBG] rebuildDisplay(${uiMode}) payload: ${JSON.stringify(json).slice(0, 500)}`)
+    } catch {}
+    const ok = await bridge.rebuildPageContainer(page)
+    log(`rebuildDisplay(${uiMode}): ${ok}`)
+    if (!ok) {
+      log(`[DBG] rebuildDisplay(${uiMode}) returned false!`, 'error')
     }
+    fetchAndSendAlbumArt(bridge)
   } catch (e) {
     log(`rebuildDisplay error: ${e}`, 'error')
   }
@@ -561,22 +563,50 @@ async function main() {
   // Create startup page — can only be called once per glasses session.
   // If it returns "invalid", likely already created; fall back to rebuildPageContainer.
   const resultNames = ['success', 'invalid', 'oversize', 'outOfMemory']
-  const createResult = await bridge.createStartUpPageContainer(buildStartupPage())
-  log(`createStartUpPageContainer: ${resultNames[createResult] ?? createResult}`)
+  const startupPayload = buildStartupPage()
+  try {
+    const startupJson = startupPayload.toJson ? startupPayload.toJson() : startupPayload
+    log(`[DBG] startup payload: ${JSON.stringify(startupJson).slice(0, 500)}`)
+  } catch (e) {
+    log(`[DBG] could not serialize startup payload: ${e}`, 'warn')
+  }
+
+  let createResult: number
+  try {
+    createResult = await bridge.createStartUpPageContainer(startupPayload)
+  } catch (e) {
+    log(`[DBG] createStartUpPageContainer threw: ${e}`, 'error')
+    createResult = -1
+  }
+  log(`createStartUpPageContainer: ${resultNames[createResult] ?? createResult} (raw=${createResult})`)
 
   if (createResult === StartUpPageCreateResult.success) {
     log('Startup page created OK')
   } else {
     log(`Startup returned ${resultNames[createResult] ?? createResult}, trying rebuildPageContainer...`, 'warn')
     const { textContainer, listContainer } = buildTextAndList()
-    const rebuildOk = await bridge.rebuildPageContainer(new RebuildPageContainer({
+    const rebuildPayload = new RebuildPageContainer({
       containerTotalNum: 2,
       textObject: [textContainer],
       listObject: [listContainer],
-    }))
+    })
+    try {
+      const rebuildJson = rebuildPayload.toJson ? rebuildPayload.toJson() : rebuildPayload
+      log(`[DBG] rebuild fallback payload: ${JSON.stringify(rebuildJson).slice(0, 500)}`)
+    } catch (e) {
+      log(`[DBG] could not serialize rebuild payload: ${e}`, 'warn')
+    }
+
+    let rebuildOk: boolean
+    try {
+      rebuildOk = await bridge.rebuildPageContainer(rebuildPayload)
+    } catch (e) {
+      log(`[DBG] rebuildPageContainer threw: ${e}`, 'error')
+      rebuildOk = false
+    }
     log(`rebuildPageContainer fallback: ${rebuildOk}`)
     if (!rebuildOk) {
-      log('Both startup and rebuild failed', 'error')
+      log('Both startup and rebuild failed — check [DBG] logs above', 'error')
       setGlassesStatus('Page create failed', 'red')
       return
     }
@@ -585,7 +615,9 @@ async function main() {
   setGlassesStatus('Glasses connected', 'green')
 
   // Rebuild with image container for album art
+  log('[DBG] calling rebuildDisplay for image+list page...')
   await rebuildDisplay(bridge)
+  log('[DBG] rebuildDisplay done')
 
   // Event handler
   bridge.onEvenHubEvent(async (event: EvenHubEvent) => {
