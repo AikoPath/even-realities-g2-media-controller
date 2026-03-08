@@ -35,11 +35,11 @@ type UIMode = 'list' | 'volume' | 'seek'
 let uiMode: UIMode = 'list'
 
 // ── Action items for the list ──
-const ACTION_PREV = 0
+const ACTION_SEEK = 0
 const ACTION_PLAY = 1
 const ACTION_NEXT = 2
-const ACTION_VOL = 3
-const ACTION_SEEK = 4
+const ACTION_PREV = 3
+const ACTION_VOL = 4
 
 // ── Bridge communication ──
 interface StatusResponse {
@@ -52,18 +52,22 @@ interface StatusResponse {
   duration: number
 }
 
+function updateStateFromResponse(data: any): void {
+  if (data.playing !== undefined) isPlaying = data.playing
+  if (data.title) title = data.title
+  if (data.artist !== undefined) artist = data.artist
+  if (data.volume !== undefined) volume = data.volume
+  if (data.maxVolume !== undefined) maxVolume = data.maxVolume
+  if (data.position !== undefined) position = data.position
+  if (data.duration !== undefined) duration = data.duration
+}
+
 async function sendCommand(cmd: MediaCommand): Promise<StatusResponse | null> {
   try {
     const res = await fetch(`${BRIDGE_URL}/${cmd}`, { method: 'POST' })
     if (res.ok) {
       const data = await res.json()
-      if (data.playing !== undefined) isPlaying = data.playing
-      if (data.title) title = data.title
-      if (data.artist !== undefined) artist = data.artist
-      if (data.volume !== undefined) volume = data.volume
-      if (data.maxVolume !== undefined) maxVolume = data.maxVolume
-      if (data.position !== undefined) position = data.position
-      if (data.duration !== undefined) duration = data.duration
+      updateStateFromResponse(data)
       return data
     }
   } catch {
@@ -75,20 +79,28 @@ async function sendCommand(cmd: MediaCommand): Promise<StatusResponse | null> {
 
 async function sendSeek(pos: number): Promise<void> {
   try {
-    await fetch(`${BRIDGE_URL}/seek?pos=${Math.round(pos)}`, { method: 'POST' })
+    const res = await fetch(`${BRIDGE_URL}/seek?pos=${Math.round(pos)}`, { method: 'POST' })
     position = pos
+    if (res.ok) {
+      const data = await res.json()
+      updateStateFromResponse(data)
+    }
   } catch { /* ignore */ }
 }
 
 async function sendVolSet(vol: number): Promise<void> {
   try {
-    await fetch(`${BRIDGE_URL}/vol-set?v=${vol}`, { method: 'POST' })
+    const res = await fetch(`${BRIDGE_URL}/vol-set?v=${vol}`, { method: 'POST' })
     volume = vol
+    if (res.ok) {
+      const data = await res.json()
+      updateStateFromResponse(data)
+    }
   } catch { /* ignore */ }
 }
 
 // ── Formatting helpers ──
-const LIST_CHAR_WIDTH = 40 // approximate chars that fit in 560px item width
+const LIST_CHAR_WIDTH = 40
 
 function centerText(text: string, width: number = LIST_CHAR_WIDTH): string {
   if (text.length >= width) return text
@@ -104,16 +116,18 @@ function formatTime(ms: number): string {
 }
 
 function buildBar(fraction: number, width: number = 12): string {
-  const filled = Math.round(fraction * width)
+  const clamped = Math.max(0, Math.min(1, fraction))
+  const filled = Math.round(clamped * width)
   return '\u2588'.repeat(filled) + '\u2591'.repeat(width - filled)
 }
 
 function volumePercent(): number {
-  return maxVolume > 0 ? Math.round((volume / maxVolume) * 100) : 0
+  if (maxVolume <= 0) return 0
+  return Math.min(100, Math.round((volume / maxVolume) * 100))
 }
 
 function volumeFraction(): number {
-  return maxVolume > 0 ? volume / maxVolume : 0
+  return maxVolume > 0 ? Math.min(1, volume / maxVolume) : 0
 }
 
 function seekFraction(): number {
@@ -130,11 +144,11 @@ function getListItems(): string[] {
   const seekBar = buildBar(seekFraction(), 10)
 
   return [
-    centerText('\u23EE Previous'),
+    centerText(`${posStr} ${seekBar} ${durStr}`),
     centerText(playLabel),
     centerText('\u23ED Next'),
+    centerText('\u23EE Previous'),
     centerText(`\u266B Vol ${volBar} ${volPct}%`),
-    centerText(`${posStr} ${seekBar} ${durStr}`),
   ]
 }
 
@@ -157,10 +171,8 @@ function getSliderText(): string {
 }
 
 // ── Page builders ──
-function buildListPage(bridge: EvenAppBridge): RebuildPageContainer | CreateStartUpPageContainer {
-  const items = getListItems()
-
-  const imgContainer = new ImageContainerProperty({
+function buildTopContainers(): { img: ImageContainerProperty; text: TextContainerProperty } {
+  const img = new ImageContainerProperty({
     containerID: 1,
     containerName: 'album-art',
     xPosition: 8,
@@ -169,7 +181,7 @@ function buildListPage(bridge: EvenAppBridge): RebuildPageContainer | CreateStar
     height: 80,
   })
 
-  const textContainer = new TextContainerProperty({
+  const text = new TextContainerProperty({
     containerID: 2,
     containerName: 'now-playing',
     xPosition: 96,
@@ -180,6 +192,13 @@ function buildListPage(bridge: EvenAppBridge): RebuildPageContainer | CreateStar
     isEventCapture: 0,
     borderWidth: 0,
   })
+
+  return { img, text }
+}
+
+function buildListPage(): RebuildPageContainer | CreateStartUpPageContainer {
+  const items = getListItems()
+  const { img, text } = buildTopContainers()
 
   const listContainer = new ListContainerProperty({
     containerID: 3,
@@ -203,32 +222,22 @@ function buildListPage(bridge: EvenAppBridge): RebuildPageContainer | CreateStar
 
   return new RebuildPageContainer({
     containerTotalNum: 3,
-    imageObject: [imgContainer],
-    textObject: [textContainer],
+    imageObject: [img],
+    textObject: [text],
     listObject: [listContainer],
   })
 }
 
 function buildSliderPage(): RebuildPageContainer {
-  const infoText = new TextContainerProperty({
-    containerID: 1,
-    containerName: 'slider-info',
-    xPosition: 8,
-    yPosition: 8,
-    width: 560,
-    height: 60,
-    content: getNowPlayingText(),
-    isEventCapture: 0,
-    borderWidth: 0,
-  })
+  const { img, text } = buildTopContainers()
 
   const sliderText = new TextContainerProperty({
-    containerID: 2,
+    containerID: 3,
     containerName: 'slider-ctrl',
     xPosition: 8,
-    yPosition: 76,
+    yPosition: 96,
     width: 560,
-    height: 204,
+    height: 184,
     content: getSliderText(),
     isEventCapture: 1,
     borderWidth: 2,
@@ -238,8 +247,9 @@ function buildSliderPage(): RebuildPageContainer {
   })
 
   return new RebuildPageContainer({
-    containerTotalNum: 2,
-    textObject: [infoText, sliderText],
+    containerTotalNum: 3,
+    imageObject: [img],
+    textObject: [text, sliderText],
   })
 }
 
@@ -252,7 +262,6 @@ async function fetchAndSendAlbumArt(bridge: EvenAppBridge): Promise<void> {
     if (!data.art || data.art === lastArtUrl) return
     lastArtUrl = data.art
 
-    // Decode base64 PNG → canvas → raw pixel bytes
     const img = new Image()
     img.crossOrigin = 'anonymous'
     await new Promise<void>((resolve, reject) => {
@@ -268,7 +277,6 @@ async function fetchAndSendAlbumArt(bridge: EvenAppBridge): Promise<void> {
     ctx.drawImage(img, 0, 0, 80, 80)
     const imageData = ctx.getImageData(0, 0, 80, 80)
 
-    // Convert RGBA to grayscale bytes (one byte per pixel)
     const pixels = imageData.data
     const grayBytes: number[] = []
     for (let i = 0; i < pixels.length; i += 4) {
@@ -291,33 +299,31 @@ async function fetchAndSendAlbumArt(bridge: EvenAppBridge): Promise<void> {
 // ── Display update ──
 async function rebuildDisplay(bridge: EvenAppBridge): Promise<void> {
   if (uiMode === 'list') {
-    await bridge.rebuildPageContainer(buildListPage(bridge))
-    // Update album art after rebuild (can't send during startup)
+    await bridge.rebuildPageContainer(buildListPage())
     fetchAndSendAlbumArt(bridge)
   } else {
     await bridge.rebuildPageContainer(buildSliderPage())
+    fetchAndSendAlbumArt(bridge)
   }
 }
 
 async function updateNowPlayingText(bridge: EvenAppBridge): Promise<void> {
-  if (uiMode === 'list') {
-    await bridge.textContainerUpgrade(
-      new TextContainerUpgrade({
-        containerID: 2,
-        containerName: 'now-playing',
-        contentOffset: 0,
-        contentLength: 500,
-        content: getNowPlayingText(),
-      })
-    )
-  }
+  await bridge.textContainerUpgrade(
+    new TextContainerUpgrade({
+      containerID: 2,
+      containerName: 'now-playing',
+      contentOffset: 0,
+      contentLength: 500,
+      content: getNowPlayingText(),
+    })
+  )
 }
 
 async function updateSliderText(bridge: EvenAppBridge): Promise<void> {
   if (uiMode !== 'list') {
     await bridge.textContainerUpgrade(
       new TextContainerUpgrade({
-        containerID: 2,
+        containerID: 3,
         containerName: 'slider-ctrl',
         contentOffset: 0,
         contentLength: 500,
@@ -335,29 +341,30 @@ async function handleListEvent(
 ): Promise<void> {
   if (eventType === OsEventTypeList.CLICK_EVENT) {
     switch (itemIndex) {
-      case ACTION_PREV:
-        await sendCommand('prev')
+      case ACTION_SEEK:
+        uiMode = 'seek'
         await rebuildDisplay(bridge)
         break
       case ACTION_PLAY:
-        await sendCommand(isPlaying ? 'pause' : 'play')
+        // Optimistically toggle play state so UI reflects immediately
+        isPlaying = !isPlaying
+        await sendCommand(isPlaying ? 'play' : 'pause')
         await rebuildDisplay(bridge)
         break
       case ACTION_NEXT:
         await sendCommand('next')
         await rebuildDisplay(bridge)
         break
+      case ACTION_PREV:
+        await sendCommand('prev')
+        await rebuildDisplay(bridge)
+        break
       case ACTION_VOL:
         uiMode = 'volume'
         await rebuildDisplay(bridge)
         break
-      case ACTION_SEEK:
-        uiMode = 'seek'
-        await rebuildDisplay(bridge)
-        break
     }
   }
-  // Scroll events in list mode are handled by the list container natively
 }
 
 async function handleSliderEvent(
@@ -367,7 +374,6 @@ async function handleSliderEvent(
   const now = Date.now()
 
   if (eventType === OsEventTypeList.DOUBLE_CLICK_EVENT) {
-    // Exit slider mode
     uiMode = 'list'
     await sendCommand('status')
     await rebuildDisplay(bridge)
@@ -384,7 +390,7 @@ async function handleSliderEvent(
       const newVol = Math.max(0, Math.min(maxVolume, volume + increment))
       await sendVolSet(newVol)
     } else if (uiMode === 'seek') {
-      const step = Math.max(5000, duration / 20) // 5% or 5s, whichever is larger
+      const step = Math.max(5000, duration / 20)
       const newPos = Math.max(0, Math.min(duration, position + increment * step))
       await sendSeek(newPos)
     }
@@ -402,27 +408,7 @@ async function main() {
 
   // Create startup page with list layout
   const items = getListItems()
-
-  const imgContainer = new ImageContainerProperty({
-    containerID: 1,
-    containerName: 'album-art',
-    xPosition: 8,
-    yPosition: 8,
-    width: 80,
-    height: 80,
-  })
-
-  const textContainer = new TextContainerProperty({
-    containerID: 2,
-    containerName: 'now-playing',
-    xPosition: 96,
-    yPosition: 8,
-    width: 472,
-    height: 80,
-    content: getNowPlayingText(),
-    isEventCapture: 0,
-    borderWidth: 0,
-  })
+  const { img, text } = buildTopContainers()
 
   const listContainer = new ListContainerProperty({
     containerID: 3,
@@ -447,8 +433,8 @@ async function main() {
   await bridge.createStartUpPageContainer(
     new CreateStartUpPageContainer({
       containerTotalNum: 3,
-      imageObject: [imgContainer],
-      textObject: [textContainer],
+      imageObject: [img],
+      textObject: [text],
       listObject: [listContainer],
     })
   )
@@ -473,12 +459,12 @@ async function main() {
     }
   })
 
-  // Periodic status poll to keep position/track info up to date
+  // Periodic status poll
   setInterval(async () => {
     const oldTitle = title
     const oldArtist = artist
     await sendCommand('status')
-    if (uiMode === 'list' && (title !== oldTitle || artist !== oldArtist)) {
+    if (title !== oldTitle || artist !== oldArtist) {
       await updateNowPlayingText(bridge)
       fetchAndSendAlbumArt(bridge)
     }
