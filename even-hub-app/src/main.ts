@@ -345,12 +345,15 @@ async function handleListEvent(
         uiMode = 'seek'
         await rebuildDisplay(bridge)
         break
-      case ACTION_PLAY:
-        // Optimistically toggle play state so UI reflects immediately
-        isPlaying = !isPlaying
-        await sendCommand(isPlaying ? 'play' : 'pause')
+      case ACTION_PLAY: {
+        // Toggle play state: send command, then force desired state
+        // (response may lag behind actual media state)
+        const wantPlaying = !isPlaying
+        await sendCommand(wantPlaying ? 'play' : 'pause')
+        isPlaying = wantPlaying
         await rebuildDisplay(bridge)
         break
+      }
       case ACTION_NEXT:
         await sendCommand('next')
         await rebuildDisplay(bridge)
