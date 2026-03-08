@@ -99,16 +99,25 @@ function updateMediaStatus() {
   }
 }
 
+function buildVolumeBar(): string {
+  if (volume < 0) return ''
+  const pct = Math.round((volume / 160) * 100)
+  const maxBlocks = 15
+  const filled = Math.round((pct / 100) * maxBlocks)
+  const bar = '\u2588'.repeat(filled) + '\u2591'.repeat(maxBlocks - filled)
+  return `[${bar}] ${pct}%`
+}
+
 function buildDisplayText(): string {
   const state = isPlaying ? '>' : '||'
-  const vol = volume >= 0 ? ` | Vol: ${volume}` : ''
-  const header = `${state} ${currentTrack}${vol}`
+  const header = `${state} ${currentTrack}`
+  const volBar = buildVolumeBar()
 
   const menu = ACTIONS.map((a, i) =>
     i === selectedIndex ? `> ${a.label}` : `  ${a.label}`
   ).join('\n')
 
-  return `${header}\n\n${menu}`
+  return `${header}${volBar ? '\n' + volBar : ''}\n\n${menu}`
 }
 
 async function updateDisplay(bridge: EvenAppBridge) {
