@@ -223,8 +223,8 @@ function getSliderText(): string {
 }
 
 // ── Page builders ──
-// Startup page: text + list only (no image — image containers cause "invalid" at startup)
-function buildStartupPage(): CreateStartUpPageContainer {
+// Build the text + list containers used for both startup and rebuild
+function buildTextAndList() {
   const items = getListItems()
 
   const textContainer = new TextContainerProperty({
@@ -234,9 +234,12 @@ function buildStartupPage(): CreateStartUpPageContainer {
     yPosition: 8,
     width: 560,
     height: 80,
+    borderWidth: 0,
+    borderColor: 0,
+    borderRdaius: 0,
+    paddingLength: 0,
     content: getNowPlayingText(),
     isEventCapture: 0,
-    borderWidth: 0,
   })
 
   const listContainer = new ListContainerProperty({
@@ -253,12 +256,17 @@ function buildStartupPage(): CreateStartUpPageContainer {
     isEventCapture: 1,
     itemContainer: new ListItemContainerProperty({
       itemCount: items.length,
-      itemWidth: 560,
+      itemWidth: 0,
       isItemSelectBorderEn: 1,
       itemName: items,
     }),
   })
 
+  return { textContainer, listContainer }
+}
+
+function buildStartupPage(): CreateStartUpPageContainer {
+  const { textContainer, listContainer } = buildTextAndList()
   return new CreateStartUpPageContainer({
     containerTotalNum: 2,
     textObject: [textContainer],
@@ -550,21 +558,33 @@ async function main() {
     log('Initial status fetch failed - bridge may be offline', 'warn')
   }
 
-  // Create startup page (text + list only, no image — image causes "invalid")
-  const createResult = await bridge.createStartUpPageContainer(buildStartupPage())
-
+  // Create startup page — can only be called once per glasses session.
+  // If it returns "invalid", likely already created; fall back to rebuildPageContainer.
   const resultNames = ['success', 'invalid', 'oversize', 'outOfMemory']
+  const createResult = await bridge.createStartUpPageContainer(buildStartupPage())
   log(`createStartUpPageContainer: ${resultNames[createResult] ?? createResult}`)
 
-  if (createResult !== StartUpPageCreateResult.success) {
-    log(`STARTUP PAGE FAILED: ${resultNames[createResult] ?? createResult}`, 'error')
-    setGlassesStatus(`Page create failed: ${resultNames[createResult]}`, 'red')
-    return
+  if (createResult === StartUpPageCreateResult.success) {
+    log('Startup page created OK')
+  } else {
+    log(`Startup returned ${resultNames[createResult] ?? createResult}, trying rebuildPageContainer...`, 'warn')
+    const { textContainer, listContainer } = buildTextAndList()
+    const rebuildOk = await bridge.rebuildPageContainer(new RebuildPageContainer({
+      containerTotalNum: 2,
+      textObject: [textContainer],
+      listObject: [listContainer],
+    }))
+    log(`rebuildPageContainer fallback: ${rebuildOk}`)
+    if (!rebuildOk) {
+      log('Both startup and rebuild failed', 'error')
+      setGlassesStatus('Page create failed', 'red')
+      return
+    }
   }
 
   setGlassesStatus('Glasses connected', 'green')
 
-  // Immediately rebuild with image container to get album art
+  // Rebuild with image container for album art
   await rebuildDisplay(bridge)
 
   // Event handler
