@@ -1,6 +1,7 @@
 import {
   waitForEvenAppBridge,
   CreateStartUpPageContainer,
+  RebuildPageContainer,
   TextContainerUpgrade,
   TextContainerProperty,
   OsEventTypeList,
@@ -12,6 +13,18 @@ import {
 const BRIDGE_PORT = 8765
 const BRIDGE_URL = `http://localhost:${BRIDGE_PORT}`
 const SCROLL_COOLDOWN_MS = 300
+const TAP_DEBOUNCE_MS = 250
+
+// Display layout
+const DISPLAY_W = 576
+const DISPLAY_H = 288
+const VOL_H = 72
+const MAIN_H = DISPLAY_H - VOL_H
+
+// Container IDs
+const CAPTURE = { id: 0, name: 'evt' }
+const MAIN = { id: 1, name: 'main' }
+const VOL = { id: 2, name: 'vol' }
 
 type MediaCommand = 'play' | 'pause' | 'next' | 'prev' | 'vol-up' | 'vol-down' | 'status'
 
@@ -136,6 +149,7 @@ async function handleAction(action: Action): Promise<void> {
       addLog('NAV', `Selected: ${name}`)
     } else if (action === 'tap') {
       if (mode.selected === VOLUME_ITEM_INDEX) {
+        // Tap to enter volume mode
         mode = { type: 'volume' }
         addLog('VOL', 'Entered volume mode')
         await sendCommand('status')
@@ -145,8 +159,12 @@ async function handleAction(action: Action): Promise<void> {
         addLog('ACTION', `${item.label} (${cmd})`)
         await sendCommand(cmd)
       }
+    } else if (action === 'double-tap') {
+      // Global play/pause shortcut
+      const cmd = isPlaying ? 'pause' : 'play'
+      addLog('ACTION', `Play/Pause (${cmd})`)
+      await sendCommand(cmd)
     }
-    // double-tap ignored in menu mode
   } else if (mode.type === 'volume') {
     if (action === 'scroll-up') {
       addLog('VOL', 'Volume down')
@@ -154,18 +172,23 @@ async function handleAction(action: Action): Promise<void> {
     } else if (action === 'scroll-down') {
       addLog('VOL', 'Volume up')
       await sendCommand('vol-up')
-    } else if (action === 'double-tap') {
+    } else if (action === 'tap') {
+      // Tap to exit volume mode
       mode = { type: 'menu', selected: VOLUME_ITEM_INDEX }
       addLog('VOL', 'Exited volume mode')
+    } else if (action === 'double-tap') {
+      // Global play/pause shortcut
+      const cmd = isPlaying ? 'pause' : 'play'
+      addLog('ACTION', `Play/Pause (${cmd})`)
+      await sendCommand(cmd)
     }
-    // tap ignored in volume mode
   }
 }
 
 // --- Glasses display ---
 
 function buildVolumeBar(): string {
-  if (volume < 0) return ''
+  if (volume < 0) return 'Volume'
   const pct = Math.round((volume / 160) * 100)
   const maxBlocks = 15
   const filled = Math.round((pct / 100) * maxBlocks)
@@ -173,8 +196,9 @@ function buildVolumeBar(): string {
   return `[${bar}] ${pct}%`
 }
 
-function buildDisplayText(): string {
-  const state = isPlaying ? '>' : '||'
+function buildMainText(): string {
+  // Use ▶ for playing, ■ for paused — avoids ambiguity with > cursor
+  const state = isPlaying ? '\u25B6' : '\u25A0'
   const header = `${state} ${currentTrack}`
   const selected = mode.type === 'menu' ? mode.selected : -1
 
@@ -182,30 +206,102 @@ function buildDisplayText(): string {
     i === selected ? `> ${item.label}` : `  ${item.label}`
   ).join('\n')
 
-  const volBar = buildVolumeBar()
-  const inVolumeMode = mode.type === 'volume'
-  let volLine: string
-  if (inVolumeMode) {
-    volLine = `>> ${volBar || 'Volume'} <<`
-  } else if (selected === VOLUME_ITEM_INDEX) {
-    volLine = `> ${volBar || 'Volume'}`
-  } else {
-    volLine = `  ${volBar || 'Volume'}`
-  }
+  return `${header}\n\n${menu}`
+}
 
-  return `${header}\n\n${menu}\n${volLine}`
+function buildVolumeText(): string {
+  return buildVolumeBar()
+}
+
+function volumeHasBorder(): boolean {
+  return mode.type === 'volume' || (mode.type === 'menu' && mode.selected === VOLUME_ITEM_INDEX)
+}
+
+function makeContainers(): TextContainerProperty[] {
+  const hasBorder = volumeHasBorder()
+  return [
+    // Hidden event capture container (renders behind others due to lowest ID)
+    new TextContainerProperty({
+      containerID: CAPTURE.id,
+      containerName: CAPTURE.name,
+      xPosition: 0,
+      yPosition: 0,
+      width: DISPLAY_W,
+      height: DISPLAY_H,
+      content: ' ',
+      isEventCapture: 1,
+      borderWidth: 0,
+    }),
+    // Main text: header + menu items
+    new TextContainerProperty({
+      containerID: MAIN.id,
+      containerName: MAIN.name,
+      xPosition: 0,
+      yPosition: 0,
+      width: DISPLAY_W,
+      height: MAIN_H,
+      content: buildMainText(),
+      isEventCapture: 0,
+      borderWidth: 0,
+    }),
+    // Volume bar with border highlight when selected/active
+    new TextContainerProperty({
+      containerID: VOL.id,
+      containerName: VOL.name,
+      xPosition: 0,
+      yPosition: MAIN_H,
+      width: DISPLAY_W,
+      height: VOL_H,
+      content: buildVolumeText(),
+      isEventCapture: 0,
+      borderWidth: hasBorder ? 2 : 0,
+      borderColor: hasBorder ? 13 : 0,
+      borderRdaius: hasBorder ? 6 : 0,
+      paddingLength: 4,
+    }),
+  ]
+}
+
+let lastVolBorder = false
+
+async function rebuildDisplay(bridge: EvenAppBridge) {
+  const containers = makeContainers()
+  await bridge.rebuildPageContainer(
+    new RebuildPageContainer({
+      containerTotalNum: containers.length,
+      textObject: containers,
+    })
+  )
 }
 
 async function updateDisplay(bridge: EvenAppBridge) {
-  await bridge.textContainerUpgrade(
-    new TextContainerUpgrade({
-      containerID: 1,
-      containerName: 'media-info',
-      contentOffset: 0,
-      contentLength: 500,
-      content: buildDisplayText(),
-    })
-  )
+  const hasBorder = volumeHasBorder()
+
+  if (hasBorder !== lastVolBorder) {
+    // Border state changed — need full rebuild
+    lastVolBorder = hasBorder
+    await rebuildDisplay(bridge)
+  } else {
+    // Text-only update — flicker-free
+    await bridge.textContainerUpgrade(
+      new TextContainerUpgrade({
+        containerID: MAIN.id,
+        containerName: MAIN.name,
+        contentOffset: 0,
+        contentLength: 1000,
+        content: buildMainText(),
+      })
+    )
+    await bridge.textContainerUpgrade(
+      new TextContainerUpgrade({
+        containerID: VOL.id,
+        containerName: VOL.name,
+        contentOffset: 0,
+        contentLength: 1000,
+        content: buildVolumeText(),
+      })
+    )
+  }
 }
 
 // --- Main ---
@@ -234,20 +330,13 @@ async function main() {
     }
   })
 
+  const containers = makeContainers()
+  lastVolBorder = volumeHasBorder()
+
   await bridge.createStartUpPageContainer(
     new CreateStartUpPageContainer({
-      containerTotalNum: 1,
-      textObject: [new TextContainerProperty({
-        containerID: 1,
-        containerName: 'media-info',
-        xPosition: 0,
-        yPosition: 0,
-        width: 576,
-        height: 288,
-        content: buildDisplayText(),
-        isEventCapture: 1,
-        borderWidth: 0,
-      })],
+      containerTotalNum: containers.length,
+      textObject: containers,
     })
   )
 
@@ -255,12 +344,34 @@ async function main() {
   await updateDisplay(bridge)
   addLog('INIT', 'Ready')
 
+  // Tap/double-tap debounce: delay tap to detect incoming double-tap.
+  // Without this, a double-tap gesture fires tap first (toggling state),
+  // then double-tap (toggling again), resulting in no net change.
+  let tapTimer: ReturnType<typeof setTimeout> | null = null
+
   bridge.onEvenHubEvent(async (event: EvenHubEvent) => {
     const action = parseEvent(event)
     if (!action) return
 
-    await handleAction(action)
-    await updateDisplay(bridge)
+    if (action === 'tap') {
+      if (tapTimer) return // already debouncing
+      tapTimer = setTimeout(async () => {
+        tapTimer = null
+        await handleAction('tap')
+        await updateDisplay(bridge)
+      }, TAP_DEBOUNCE_MS)
+    } else if (action === 'double-tap') {
+      // Cancel pending tap — double-tap takes priority
+      if (tapTimer) {
+        clearTimeout(tapTimer)
+        tapTimer = null
+      }
+      await handleAction('double-tap')
+      await updateDisplay(bridge)
+    } else {
+      await handleAction(action)
+      await updateDisplay(bridge)
+    }
   })
 }
 
