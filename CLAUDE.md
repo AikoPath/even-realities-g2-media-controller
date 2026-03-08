@@ -10,3 +10,4 @@
 ## Git Workflow
 
 - Always commit and push new or changed files immediately after creating/editing them. Do not wait for reminders or hooks.
+- **ALWAYS** include a PR link immediately after every push. No exceptions. Do not wait to be asked.

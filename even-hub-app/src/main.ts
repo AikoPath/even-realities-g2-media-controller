@@ -21,13 +21,13 @@ declare const __APP_VERSION__: string
 const versionEl = document.getElementById('version')
 if (versionEl) versionEl.textContent = `v${__APP_VERSION__}`
 
-// Action menu
+// Action menu (volume bar is separate, always at bottom)
 const ACTIONS: { label: string; command: () => MediaCommand }[] = [
   { label: 'Play / Pause', command: () => isPlaying ? 'pause' : 'play' },
   { label: 'Next Track',   command: () => 'next' },
   { label: 'Prev Track',   command: () => 'prev' },
-  { label: 'Volume',       command: () => 'status' },
 ]
+const VOLUME_INDEX = ACTIONS.length // selectedIndex == this means volume bar is selected
 
 // State
 let isPlaying = false
@@ -104,7 +104,7 @@ function buildVolumeBar(): string {
   const pct = Math.round((volume / 160) * 100)
   const maxBlocks = 15
   const filled = Math.round((pct / 100) * maxBlocks)
-  const bar = '#'.repeat(filled) + '-'.repeat(maxBlocks - filled)
+  const bar = '\u2588'.repeat(filled) + '\u2591'.repeat(maxBlocks - filled)
   return `[${bar}] ${pct}%`
 }
 
@@ -113,15 +113,16 @@ function buildDisplayText(): string {
   const header = `${state} ${currentTrack}`
   const volBar = buildVolumeBar()
 
-  const menu = ACTIONS.map((a, i) => {
-    const cursor = i === selectedIndex ? '>' : ' '
-    if (a.label === 'Volume' && i === selectedIndex && volumeMode) {
-      return `${cursor} ${volBar || 'Volume'}`
-    }
-    return `${cursor} ${a.label}`
-  }).join('\n')
+  const menu = ACTIONS.map((a, i) =>
+    i === selectedIndex ? `> ${a.label}` : `  ${a.label}`
+  ).join('\n')
 
-  return `${header}\n\n${menu}`
+  const volSelected = selectedIndex === VOLUME_INDEX
+  const volLine = volSelected
+    ? `> ${volBar || 'Volume'}`
+    : `  ${volBar || 'Volume'}`
+
+  return `${header}\n\n${menu}\n${volLine}`
 }
 
 async function updateDisplay(bridge: EvenAppBridge) {
@@ -201,14 +202,15 @@ async function main() {
 
     const now = Date.now()
 
+    const totalItems = ACTIONS.length + 1 // +1 for volume bar
+
     if (eventType === OsEventTypeList.CLICK_EVENT) {
-      if (ACTIONS[selectedIndex].label === 'Volume' && !volumeMode) {
-        // Enter volume mode
+      if (selectedIndex === VOLUME_INDEX) {
+        // Tap on volume bar enters volume mode
         volumeMode = true
         addLog('VOL', 'Entered volume mode')
         await sendCommand('status')
       } else {
-        // Execute selected action
         const selected = ACTIONS[selectedIndex]
         const cmd = selected.command()
         addLog('ACTION', `${selected.label} (${cmd})`)
@@ -218,11 +220,6 @@ async function main() {
       if (volumeMode) {
         volumeMode = false
         addLog('VOL', 'Exited volume mode')
-      } else {
-        const selected = ACTIONS[selectedIndex]
-        const cmd = selected.command()
-        addLog('ACTION', `${selected.label} (${cmd})`)
-        await sendCommand(cmd)
       }
     } else if (eventType === OsEventTypeList.SCROLL_TOP_EVENT && now - lastScrollTime > SCROLL_COOLDOWN_MS) {
       lastScrollTime = now
@@ -230,8 +227,8 @@ async function main() {
         addLog('VOL', 'Volume up')
         await sendCommand('vol-up')
       } else {
-        selectedIndex = (selectedIndex + 1) % ACTIONS.length
-        addLog('NAV', `Selected: ${ACTIONS[selectedIndex].label}`)
+        selectedIndex = (selectedIndex + 1) % totalItems
+        addLog('NAV', `Selected: ${selectedIndex === VOLUME_INDEX ? 'Volume' : ACTIONS[selectedIndex].label}`)
       }
     } else if (eventType === OsEventTypeList.SCROLL_BOTTOM_EVENT && now - lastScrollTime > SCROLL_COOLDOWN_MS) {
       lastScrollTime = now
@@ -239,8 +236,8 @@ async function main() {
         addLog('VOL', 'Volume down')
         await sendCommand('vol-down')
       } else {
-        selectedIndex = (selectedIndex - 1 + ACTIONS.length) % ACTIONS.length
-        addLog('NAV', `Selected: ${ACTIONS[selectedIndex].label}`)
+        selectedIndex = (selectedIndex - 1 + totalItems) % totalItems
+        addLog('NAV', `Selected: ${selectedIndex === VOLUME_INDEX ? 'Volume' : ACTIONS[selectedIndex].label}`)
       }
     } else {
       addLog('EVENT', `unhandled eventType=${eventType}`)
