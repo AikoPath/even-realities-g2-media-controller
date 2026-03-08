@@ -18,9 +18,7 @@ type MediaCommand = 'play' | 'pause' | 'next' | 'prev' | 'vol-up' | 'vol-down' |
 // State
 let isPlaying = false
 let lastScrollTime = 0
-let lastTapTime = 0
 let bridgeReady = false
-const TAP_COOLDOWN_MS = 500
 let currentTrack = 'No media'
 let volume = -1
 
@@ -134,17 +132,14 @@ async function main() {
     } else if (ct === 'connectionFailed') {
       setStatus('glasses', 'dot-red', 'Glasses: connection failed')
     }
-    // Firmware quirk: single tap arrives here as connectType='none' instead of
-    // onEvenHubEvent with CLICK_EVENT=0. Debounce and ignore during startup.
+    // Firmware bug: single tap arrives here as connectType='none' instead of
+    // onEvenHubEvent with CLICK_EVENT=0. The simulator sends it correctly;
+    // only real hardware has this issue. Treat 'none' as play/pause once ready.
     if (ct === 'none' && bridgeReady) {
-      const now = Date.now()
-      if (now - lastTapTime > TAP_COOLDOWN_MS) {
-        lastTapTime = now
-        const action = isPlaying ? 'pause' : 'play'
-        addLog('ACTION', `${action} (single tap)`)
-        await sendCommand(action)
-        await updateDisplay(bridge)
-      }
+      const action = isPlaying ? 'pause' : 'play'
+      addLog('ACTION', `${action} (single tap)`)
+      await sendCommand(action)
+      await updateDisplay(bridge)
     }
   })
 
