@@ -88,6 +88,14 @@ async function sendVolSet(vol: number): Promise<void> {
 }
 
 // ── Formatting helpers ──
+const LIST_CHAR_WIDTH = 40 // approximate chars that fit in 560px item width
+
+function centerText(text: string, width: number = LIST_CHAR_WIDTH): string {
+  if (text.length >= width) return text
+  const pad = Math.floor((width - text.length) / 2)
+  return ' '.repeat(pad) + text
+}
+
 function formatTime(ms: number): string {
   const totalSec = Math.floor(ms / 1000)
   const min = Math.floor(totalSec / 60)
@@ -122,11 +130,11 @@ function getListItems(): string[] {
   const seekBar = buildBar(seekFraction(), 10)
 
   return [
-    '\u23EE Previous',
-    playLabel,
-    '\u23ED Next',
-    `\u266B Vol ${volBar} ${volPct}%`,
-    `${posStr} ${seekBar} ${durStr}`,
+    centerText('\u23EE Previous'),
+    centerText(playLabel),
+    centerText('\u23ED Next'),
+    centerText(`\u266B Vol ${volBar} ${volPct}%`),
+    centerText(`${posStr} ${seekBar} ${durStr}`),
   ]
 }
 
