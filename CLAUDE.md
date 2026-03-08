@@ -67,6 +67,7 @@ Events arrive via `bridge.onEvenHubEvent(callback)` as `EvenHubEvent`:
 - **Scroll throttling**: Scroll events fire rapidly. Use 300ms cooldown.
 - **Tap/double-tap debounce**: Firmware may send CLICK_EVENT before DOUBLE_CLICK_EVENT for a double-tap gesture. Delay tap handling ~250ms and cancel if double-tap arrives. Without this, tap fires first (toggling state), then double-tap toggles again → no net change.
 - **`borderRdaius`**: SDK has a typo — use `borderRdaius` not `borderRadius`.
+- **Stale bridge response for play/pause**: The Android bridge dispatches `transportControls.play()`/`.pause()` then immediately reads `playbackState`. Since the dispatch is async, the response returns the OLD state. Always set `isPlaying` optimistically based on the command sent, not the bridge response.
 
 ### UI Patterns
 

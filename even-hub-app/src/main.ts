@@ -13,7 +13,6 @@ import {
 const BRIDGE_PORT = 8765
 const BRIDGE_URL = `http://localhost:${BRIDGE_PORT}`
 const SCROLL_COOLDOWN_MS = 300
-const TAP_DEBOUNCE_MS = 250
 
 // Display layout
 const DISPLAY_W = 576
@@ -137,6 +136,27 @@ type Mode =
 
 let mode: Mode = { type: 'menu', selected: 0 }
 
+// Optimistically toggle play state. The bridge reads playbackState immediately
+// after dispatching play()/pause(), before Android has actually changed state,
+// so the response returns stale data. We set isPlaying based on our intent.
+async function togglePlayPause(): Promise<void> {
+  const wantPlay = !isPlaying
+  const cmd = wantPlay ? 'play' : 'pause'
+  addLog('ACTION', `Play/Pause (${cmd})`)
+  isPlaying = wantPlay
+  updateMediaStatus()
+  await sendCommand(cmd)
+}
+
+// For menu items that might be play/pause or might be next/prev
+async function togglePlayPauseOrSend(cmd: MediaCommand): Promise<void> {
+  if (cmd === 'play' || cmd === 'pause') {
+    isPlaying = cmd === 'play'
+    updateMediaStatus()
+  }
+  await sendCommand(cmd)
+}
+
 async function handleAction(action: Action): Promise<void> {
   if (mode.type === 'menu') {
     if (action === 'scroll-up') {
@@ -157,13 +177,11 @@ async function handleAction(action: Action): Promise<void> {
         const item = MENU_ITEMS[mode.selected]
         const cmd = item.command()
         addLog('ACTION', `${item.label} (${cmd})`)
-        await sendCommand(cmd)
+        await togglePlayPauseOrSend(cmd)
       }
     } else if (action === 'double-tap') {
       // Global play/pause shortcut
-      const cmd = isPlaying ? 'pause' : 'play'
-      addLog('ACTION', `Play/Pause (${cmd})`)
-      await sendCommand(cmd)
+      await togglePlayPause()
     }
   } else if (mode.type === 'volume') {
     if (action === 'scroll-up') {
@@ -178,9 +196,7 @@ async function handleAction(action: Action): Promise<void> {
       addLog('VOL', 'Exited volume mode')
     } else if (action === 'double-tap') {
       // Global play/pause shortcut
-      const cmd = isPlaying ? 'pause' : 'play'
-      addLog('ACTION', `Play/Pause (${cmd})`)
-      await sendCommand(cmd)
+      await togglePlayPause()
     }
   }
 }
@@ -344,34 +360,11 @@ async function main() {
   await updateDisplay(bridge)
   addLog('INIT', 'Ready')
 
-  // Tap/double-tap debounce: delay tap to detect incoming double-tap.
-  // Without this, a double-tap gesture fires tap first (toggling state),
-  // then double-tap (toggling again), resulting in no net change.
-  let tapTimer: ReturnType<typeof setTimeout> | null = null
-
   bridge.onEvenHubEvent(async (event: EvenHubEvent) => {
     const action = parseEvent(event)
     if (!action) return
-
-    if (action === 'tap') {
-      if (tapTimer) return // already debouncing
-      tapTimer = setTimeout(async () => {
-        tapTimer = null
-        await handleAction('tap')
-        await updateDisplay(bridge)
-      }, TAP_DEBOUNCE_MS)
-    } else if (action === 'double-tap') {
-      // Cancel pending tap — double-tap takes priority
-      if (tapTimer) {
-        clearTimeout(tapTimer)
-        tapTimer = null
-      }
-      await handleAction('double-tap')
-      await updateDisplay(bridge)
-    } else {
-      await handleAction(action)
-      await updateDisplay(bridge)
-    }
+    await handleAction(action)
+    await updateDisplay(bridge)
   })
 }
 
