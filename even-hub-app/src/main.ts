@@ -3,7 +3,7 @@ import {
   CreateStartUpPageContainer,
   TextContainerUpgrade,
   TextContainerProperty,
-  StartUpPageCreateResult,
+  OsEventTypeList,
   type EvenHubEvent,
   type EvenAppBridge,
   type DeviceStatus,
@@ -12,12 +12,6 @@ import {
 const BRIDGE_PORT = 8765
 const BRIDGE_URL = `http://localhost:${BRIDGE_PORT}`
 const SCROLL_COOLDOWN_MS = 300
-
-// Hardware event types (SDK enum is wrong: CLICK=0 but hardware sends tap=1)
-const HW_TAP = 1
-const HW_SCROLL_UP = 2    // scroll forward
-const HW_DOUBLE_TAP = 3
-const HW_SCROLL_DOWN = 4  // scroll backward (if supported, else 2 covers both via direction)
 
 type MediaCommand = 'play' | 'pause' | 'next' | 'prev' | 'vol-up' | 'vol-down' | 'status'
 
@@ -113,18 +107,6 @@ async function updateDisplay(bridge: EvenAppBridge) {
   )
 }
 
-// --- Event name for logging ---
-
-function eventName(type: number | undefined): string {
-  switch (type) {
-    case HW_TAP: return 'tap'
-    case HW_SCROLL_UP: return 'scroll'
-    case HW_DOUBLE_TAP: return 'double-tap'
-    case HW_SCROLL_DOWN: return 'scroll-down'
-    default: return `unknown(${type})`
-  }
-}
-
 // --- Main ---
 
 async function main() {
@@ -166,55 +148,42 @@ async function main() {
     borderWidth: 0,
   })
 
-  const createResult = await bridge.createStartUpPageContainer(
+  await bridge.createStartUpPageContainer(
     new CreateStartUpPageContainer({
       containerTotalNum: 1,
       textObject: [textContainer],
     })
   )
 
-  // "invalid" (1) means page exists from previous session — it's reusable, not an error
-  if (createResult === StartUpPageCreateResult.success || createResult === StartUpPageCreateResult.invalid) {
-    setStatus('page', 'dot-green', `Page: active (${createResult === StartUpPageCreateResult.invalid ? 'reused' : 'created'})`)
-    addLog('PAGE', `createStartUpPage result=${createResult} (${createResult === StartUpPageCreateResult.invalid ? 'reused existing' : 'created new'})`)
-  } else {
-    setStatus('page', 'dot-red', `Page: error (${createResult})`)
-    addLog('PAGE', `createStartUpPage FAILED result=${createResult}`)
-  }
-
   // Fetch initial status
   await sendCommand('status')
   await updateDisplay(bridge)
   addLog('INIT', 'Initial status fetched, display updated')
 
-  // Handle glasses events using raw hardware event type values
+  // Handle glasses events
   bridge.onEvenHubEvent(async (event: EvenHubEvent) => {
     const te = event.textEvent
     const se = event.sysEvent
 
-    // Use raw eventType number — SDK enum values don't match hardware
-    const rawType = (te as any)?.eventType ?? (se as any)?.eventType
-    if (rawType === undefined) {
-      addLog('EVENT', `ignored: ${JSON.stringify(event.jsonData ?? {})}`)
-      return
-    }
+    const eventType = te?.eventType ?? se?.eventType
+    if (eventType === undefined) return
 
-    addLog('EVENT', `type=${eventName(rawType)} raw=${rawType}`)
+    addLog('EVENT', `type=${eventType}`)
 
     const now = Date.now()
 
-    if (rawType === HW_DOUBLE_TAP) {
+    if (eventType === OsEventTypeList.DOUBLE_CLICK_EVENT) {
       addLog('ACTION', 'Next track')
       await sendCommand('next')
-    } else if (rawType === HW_TAP) {
+    } else if (eventType === OsEventTypeList.CLICK_EVENT) {
       const action = isPlaying ? 'pause' : 'play'
       addLog('ACTION', `${action}`)
       await sendCommand(action)
-    } else if (rawType === HW_SCROLL_UP && now - lastScrollTime > SCROLL_COOLDOWN_MS) {
+    } else if (eventType === OsEventTypeList.SCROLL_TOP_EVENT && now - lastScrollTime > SCROLL_COOLDOWN_MS) {
       lastScrollTime = now
       addLog('ACTION', 'Volume up')
       await sendCommand('vol-up')
-    } else if (rawType === HW_SCROLL_DOWN && now - lastScrollTime > SCROLL_COOLDOWN_MS) {
+    } else if (eventType === OsEventTypeList.SCROLL_BOTTOM_EVENT && now - lastScrollTime > SCROLL_COOLDOWN_MS) {
       lastScrollTime = now
       addLog('ACTION', 'Volume down')
       await sendCommand('vol-down')
