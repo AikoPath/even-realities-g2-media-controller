@@ -26,13 +26,13 @@ const ACTIONS: { label: string; command: () => MediaCommand }[] = [
   { label: 'Play / Pause', command: () => isPlaying ? 'pause' : 'play' },
   { label: 'Next Track',   command: () => 'next' },
   { label: 'Prev Track',   command: () => 'prev' },
-  { label: 'Volume Up',    command: () => 'vol-up' },
-  { label: 'Volume Down',  command: () => 'vol-down' },
+  { label: 'Volume',       command: () => 'status' },
 ]
 
 // State
 let isPlaying = false
 let selectedIndex = 0
+let volumeMode = false
 let lastScrollTime = 0
 let currentTrack = 'No media'
 let volume = -1
@@ -113,11 +113,15 @@ function buildDisplayText(): string {
   const header = `${state} ${currentTrack}`
   const volBar = buildVolumeBar()
 
-  const menu = ACTIONS.map((a, i) =>
-    i === selectedIndex ? `> ${a.label}` : `  ${a.label}`
-  ).join('\n')
+  const menu = ACTIONS.map((a, i) => {
+    const cursor = i === selectedIndex ? '>' : ' '
+    if (a.label === 'Volume' && i === selectedIndex && volumeMode) {
+      return `${cursor} ${volBar || 'Volume'}`
+    }
+    return `${cursor} ${a.label}`
+  }).join('\n')
 
-  return `${header}${volBar ? '\n' + volBar : ''}\n\n${menu}`
+  return `${header}\n\n${menu}`
 }
 
 async function updateDisplay(bridge: EvenAppBridge) {
@@ -198,25 +202,46 @@ async function main() {
     const now = Date.now()
 
     if (eventType === OsEventTypeList.CLICK_EVENT) {
-      // Tap = execute selected action
-      const selected = ACTIONS[selectedIndex]
-      const cmd = selected.command()
-      addLog('ACTION', `${selected.label} (${cmd})`)
-      await sendCommand(cmd)
+      if (ACTIONS[selectedIndex].label === 'Volume' && !volumeMode) {
+        // Enter volume mode
+        volumeMode = true
+        addLog('VOL', 'Entered volume mode')
+        await sendCommand('status')
+      } else {
+        // Execute selected action
+        const selected = ACTIONS[selectedIndex]
+        const cmd = selected.command()
+        addLog('ACTION', `${selected.label} (${cmd})`)
+        await sendCommand(cmd)
+      }
+    } else if (eventType === OsEventTypeList.DOUBLE_CLICK_EVENT) {
+      if (volumeMode) {
+        volumeMode = false
+        addLog('VOL', 'Exited volume mode')
+      } else {
+        const selected = ACTIONS[selectedIndex]
+        const cmd = selected.command()
+        addLog('ACTION', `${selected.label} (${cmd})`)
+        await sendCommand(cmd)
+      }
     } else if (eventType === OsEventTypeList.SCROLL_TOP_EVENT && now - lastScrollTime > SCROLL_COOLDOWN_MS) {
       lastScrollTime = now
-      selectedIndex = (selectedIndex + 1) % ACTIONS.length
-      addLog('NAV', `Selected: ${ACTIONS[selectedIndex].label}`)
+      if (volumeMode) {
+        addLog('VOL', 'Volume up')
+        await sendCommand('vol-up')
+      } else {
+        selectedIndex = (selectedIndex + 1) % ACTIONS.length
+        addLog('NAV', `Selected: ${ACTIONS[selectedIndex].label}`)
+      }
     } else if (eventType === OsEventTypeList.SCROLL_BOTTOM_EVENT && now - lastScrollTime > SCROLL_COOLDOWN_MS) {
       lastScrollTime = now
-      selectedIndex = (selectedIndex - 1 + ACTIONS.length) % ACTIONS.length
-      addLog('NAV', `Selected: ${ACTIONS[selectedIndex].label}`)
-    } else if (eventType === OsEventTypeList.DOUBLE_CLICK_EVENT) {
-      // Double tap also executes selected action (alternative trigger)
-      const selected = ACTIONS[selectedIndex]
-      const cmd = selected.command()
-      addLog('ACTION', `${selected.label} (${cmd})`)
-      await sendCommand(cmd)
+      if (volumeMode) {
+        addLog('VOL', 'Volume down')
+        await sendCommand('vol-down')
+      } else {
+        selectedIndex = (selectedIndex - 1 + ACTIONS.length) % ACTIONS.length
+        addLog('NAV', `Selected: ${ACTIONS[selectedIndex].label}`)
+      }
     } else {
       addLog('EVENT', `unhandled eventType=${eventType}`)
       return
