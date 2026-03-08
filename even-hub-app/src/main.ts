@@ -36,6 +36,8 @@ let volumeMode = false
 let lastScrollTime = 0
 let currentTrack = 'No media'
 let volume = -1
+let clickTimer: ReturnType<typeof setTimeout> | null = null
+const DOUBLE_TAP_WINDOW_MS = 400
 
 // --- Phone UI helpers ---
 
@@ -104,7 +106,7 @@ function buildVolumeBar(): string {
   const pct = Math.round((volume / 160) * 100)
   const maxBlocks = 15
   const filled = Math.round((pct / 100) * maxBlocks)
-  const bar = '#'.repeat(filled) + '-'.repeat(maxBlocks - filled)
+  const bar = '='.repeat(filled) + '.'.repeat(maxBlocks - filled)
   return `[${bar}] ${pct}%`
 }
 
@@ -115,8 +117,11 @@ function buildDisplayText(): string {
 
   const menu = ACTIONS.map((a, i) => {
     const cursor = i === selectedIndex ? '>' : ' '
-    if (a.label === 'Volume' && i === selectedIndex && volumeMode) {
-      return `${cursor} ${volBar || 'Volume'}`
+    if (a.label === 'Volume') {
+      if (volumeMode && i === selectedIndex) {
+        return `${cursor} ${volBar || 'Volume'}`
+      }
+      return `${cursor} Vol ${volBar || ''}`
     }
     return `${cursor} ${a.label}`
   }).join('\n')
@@ -202,19 +207,26 @@ async function main() {
     const now = Date.now()
 
     if (eventType === OsEventTypeList.CLICK_EVENT) {
-      if (ACTIONS[selectedIndex].label === 'Volume' && !volumeMode) {
-        // Enter volume mode
-        volumeMode = true
-        addLog('VOL', 'Entered volume mode')
-        await sendCommand('status')
-      } else {
-        // Execute selected action
-        const selected = ACTIONS[selectedIndex]
-        const cmd = selected.command()
-        addLog('ACTION', `${selected.label} (${cmd})`)
-        await sendCommand(cmd)
-      }
+      // Delay single tap to distinguish from double tap
+      if (clickTimer) clearTimeout(clickTimer)
+      clickTimer = setTimeout(async () => {
+        clickTimer = null
+        if (ACTIONS[selectedIndex].label === 'Volume' && !volumeMode) {
+          volumeMode = true
+          addLog('VOL', 'Entered volume mode')
+          await sendCommand('status')
+        } else {
+          const selected = ACTIONS[selectedIndex]
+          const cmd = selected.command()
+          addLog('ACTION', `${selected.label} (${cmd})`)
+          await sendCommand(cmd)
+        }
+        await updateDisplay(bridge)
+      }, DOUBLE_TAP_WINDOW_MS)
+      return
     } else if (eventType === OsEventTypeList.DOUBLE_CLICK_EVENT) {
+      // Cancel pending single tap
+      if (clickTimer) { clearTimeout(clickTimer); clickTimer = null }
       if (volumeMode) {
         volumeMode = false
         addLog('VOL', 'Exited volume mode')
