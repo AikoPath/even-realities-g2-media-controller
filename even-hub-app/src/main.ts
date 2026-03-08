@@ -39,22 +39,15 @@ function updatePhoneUI() {
 
 const DOT_COLORS = { green: '#4caf50', red: '#f44336', yellow: '#ff9800' }
 
-let glassesConnected = false
-
 function setBridgeStatus(online: boolean) {
   bridgeOnline = online
   const dot = document.getElementById('bridge-dot')
   const status = document.getElementById('bridge-status')
   if (dot) dot.style.backgroundColor = online ? DOT_COLORS.green : DOT_COLORS.red
   if (status) status.textContent = online ? 'Bridge connected' : 'Bridge offline'
-  if (glassesConnected) {
-    const gDot = document.getElementById('glasses-dot')
-    if (gDot) gDot.style.backgroundColor = DOT_COLORS.green
-  }
 }
 
 function setGlassesStatus(msg: string, color: 'green' | 'yellow' | 'red') {
-  glassesConnected = color === 'green'
   const dot = document.getElementById('glasses-dot')
   const el = document.getElementById('glasses-status')
   if (dot) dot.style.backgroundColor = DOT_COLORS[color]
@@ -208,28 +201,26 @@ async function updateDisplay(bridge: EvenAppBridge): Promise<void> {
 }
 
 // ── Event handling ──
-// Hardware event types observed from actual glasses (different from SDK enum!):
-// SDK enum:  CLICK=0, SCROLL_TOP=1, SCROLL_BOTTOM=2, DOUBLE_CLICK=3
-// Hardware:  tap=1,   scroll=2,      (no separate dir), double-tap=3
-const HW_TAP = 1
-const HW_SCROLL = 2
-const HW_DOUBLE_TAP = 3
-
 async function handleEvent(
   bridge: EvenAppBridge,
-  eventType: number,
+  eventType: OsEventTypeList,
 ): Promise<void> {
   const now = Date.now()
   log(`handleEvent: type=${eventType}`)
 
-  if (eventType === HW_DOUBLE_TAP) {
+  if (eventType === OsEventTypeList.DOUBLE_CLICK_EVENT) {
     await sendCommand('next')
-  } else if (eventType === HW_TAP) {
+  } else if (eventType === OsEventTypeList.CLICK_EVENT) {
     await sendCommand(isPlaying ? 'pause' : 'play')
-  } else if (eventType === HW_SCROLL && now - lastScrollTime > SCROLL_COOLDOWN_MS) {
+  } else if (eventType === OsEventTypeList.SCROLL_TOP_EVENT && now - lastScrollTime > SCROLL_COOLDOWN_MS) {
     lastScrollTime = now
     const step = volumeStep()
     const newVol = Math.min(maxVolume, volume + step)
+    await sendVolSet(newVol)
+  } else if (eventType === OsEventTypeList.SCROLL_BOTTOM_EVENT && now - lastScrollTime > SCROLL_COOLDOWN_MS) {
+    lastScrollTime = now
+    const step = volumeStep()
+    const newVol = Math.max(0, volume - step)
     await sendVolSet(newVol)
   } else {
     return
@@ -283,19 +274,17 @@ async function main() {
   }
   log(`createStartUpPageContainer: ${resultNames[createResult] ?? createResult} (raw=${createResult})`)
 
-  if (createResult === StartUpPageCreateResult.success) {
-    log('Startup page created OK')
-  } else if (createResult === StartUpPageCreateResult.invalid) {
-    // Page exists from previous session — reuse it, update text
-    log('Page exists from previous session — reusing')
-    await updateDisplay(bridge)
-  } else {
+  if (createResult !== StartUpPageCreateResult.success) {
     log(`STARTUP FAILED: ${resultNames[createResult] ?? createResult}`, 'error')
     setGlassesStatus(`Startup failed: ${resultNames[createResult] ?? createResult}`, 'red')
     return
   }
 
   setGlassesStatus('Glasses connected', 'green')
+  log('Startup page created OK')
+
+  // Update display with current state
+  await updateDisplay(bridge)
 
   // Event handler
   bridge.onEvenHubEvent(async (event: EvenHubEvent) => {
