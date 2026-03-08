@@ -165,7 +165,7 @@ function formatTime(ms: number): string {
 function buildBar(fraction: number, width: number = 12): string {
   const clamped = Math.max(0, Math.min(1, fraction))
   const filled = Math.round(clamped * width)
-  return '#'.repeat(filled) + '-'.repeat(width - filled)
+  return '\u2588'.repeat(filled) + '\u2591'.repeat(width - filled)
 }
 
 function volumePercent(): number {
@@ -186,9 +186,9 @@ function volumeStep(): number {
   return Math.max(1, Math.round(maxVolume / 20))
 }
 
-// ── List item labels (ASCII only — glasses firmware may reject unicode) ──
+// ── List item labels ──
 function getListItems(): string[] {
-  const playLabel = isPlaying ? '|| Pause' : '> Play'
+  const playLabel = isPlaying ? '\u23F8 Pause' : '\u25B6 Play'
   const volBar = buildBar(volumeFraction(), 10)
   const volPct = volumePercent()
   const posStr = formatTime(position)
@@ -198,20 +198,20 @@ function getListItems(): string[] {
   return [
     centerText(`${posStr} ${seekBar} ${durStr}`),
     centerText(playLabel),
-    centerText('>> Next'),
-    centerText('<< Previous'),
-    centerText(`Vol ${volBar} ${volPct}%`),
+    centerText('\u23ED Next'),
+    centerText('\u23EE Previous'),
+    centerText(`\u266B Vol ${volBar} ${volPct}%`),
   ]
 }
 
 // ── Now-playing text ──
 function getNowPlayingText(): string {
-  const state = isPlaying ? '>' : '||'
+  const state = isPlaying ? '\u25B6' : '\u23F8'
   const line1 = `${state} ${title}`
   return artist ? `${line1}\n${artist}` : line1
 }
 
-// ── Slider mode text (ASCII only) ──
+// ── Slider mode text ──
 function getSliderText(): string {
   if (uiMode === 'volume') {
     const bar = buildBar(volumeFraction(), 20)
@@ -223,27 +223,34 @@ function getSliderText(): string {
 }
 
 // ── Page builders ──
-// ASCII-only text — glasses firmware may reject unicode.
-function buildTextAndList() {
+// Startup page: must match the original working structure exactly
+// (3 containers: image + text + list, itemWidth=560)
+function buildStartupPage(): CreateStartUpPageContainer {
   const items = getListItems()
 
-  const textContainer = new TextContainerProperty({
+  const imgContainer = new ImageContainerProperty({
     containerID: 1,
-    containerName: 'now-playing',
+    containerName: 'album-art',
     xPosition: 8,
     yPosition: 8,
-    width: 560,
+    width: 80,
     height: 80,
-    borderWidth: 0,
-    borderColor: 0,
-    borderRdaius: 0,
-    paddingLength: 0,
+  })
+
+  const textContainer = new TextContainerProperty({
+    containerID: 2,
+    containerName: 'now-playing',
+    xPosition: 96,
+    yPosition: 8,
+    width: 472,
+    height: 80,
     content: getNowPlayingText(),
     isEventCapture: 0,
+    borderWidth: 0,
   })
 
   const listContainer = new ListContainerProperty({
-    containerID: 2,
+    containerID: 3,
     containerName: 'actions',
     xPosition: 0,
     yPosition: 96,
@@ -256,19 +263,15 @@ function buildTextAndList() {
     isEventCapture: 1,
     itemContainer: new ListItemContainerProperty({
       itemCount: items.length,
-      itemWidth: 0,
+      itemWidth: 560,
       isItemSelectBorderEn: 1,
       itemName: items,
     }),
   })
 
-  return { textContainer, listContainer }
-}
-
-function buildStartupPage(): CreateStartUpPageContainer {
-  const { textContainer, listContainer } = buildTextAndList()
   return new CreateStartUpPageContainer({
-    containerTotalNum: 2,
+    containerTotalNum: 3,
+    imageObject: [imgContainer],
     textObject: [textContainer],
     listObject: [listContainer],
   })
@@ -294,12 +297,9 @@ function buildListPage(): RebuildPageContainer {
     yPosition: 8,
     width: 472,
     height: 80,
-    borderWidth: 0,
-    borderColor: 0,
-    borderRdaius: 0,
-    paddingLength: 0,
     content: getNowPlayingText(),
     isEventCapture: 0,
+    borderWidth: 0,
   })
 
   const listContainer = new ListContainerProperty({
@@ -316,7 +316,7 @@ function buildListPage(): RebuildPageContainer {
     isEventCapture: 1,
     itemContainer: new ListItemContainerProperty({
       itemCount: items.length,
-      itemWidth: 0,
+      itemWidth: 560,
       isItemSelectBorderEn: 1,
       itemName: items,
     }),
@@ -347,12 +347,9 @@ function buildSliderPage(): RebuildPageContainer {
     yPosition: 8,
     width: 472,
     height: 80,
-    borderWidth: 0,
-    borderColor: 0,
-    borderRdaius: 0,
-    paddingLength: 0,
     content: getNowPlayingText(),
     isEventCapture: 0,
+    borderWidth: 0,
   })
 
   const sliderText = new TextContainerProperty({
@@ -590,12 +587,8 @@ async function main() {
     log('Startup page created OK')
   } else {
     log(`Startup returned ${resultNames[createResult] ?? createResult}, trying rebuildPageContainer...`, 'warn')
-    const { textContainer, listContainer } = buildTextAndList()
-    const rebuildPayload = new RebuildPageContainer({
-      containerTotalNum: 2,
-      textObject: [textContainer],
-      listObject: [listContainer],
-    })
+    // Use the same 3-container layout (image+text+list) as the startup page
+    const rebuildPayload = buildListPage()
     try {
       const rebuildJson = (rebuildPayload as any).toJson ? (rebuildPayload as any).toJson() : rebuildPayload
       log(`[DBG] rebuild fallback payload: ${JSON.stringify(rebuildJson).slice(0, 500)}`)
