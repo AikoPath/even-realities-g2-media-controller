@@ -104,7 +104,7 @@ function buildVolumeBar(): string {
   const pct = Math.round((volume / 160) * 100)
   const maxBlocks = 15
   const filled = Math.round((pct / 100) * maxBlocks)
-  const bar = '\u2588'.repeat(filled) + '\u2591'.repeat(maxBlocks - filled)
+  const bar = '#'.repeat(filled) + '-'.repeat(maxBlocks - filled)
   return `[${bar}] ${pct}%`
 }
 
@@ -192,18 +192,8 @@ async function main() {
 
     const eventType = te?.eventType ?? se?.eventType
 
-    // Firmware sends single tap as empty evenHubEvent (no eventType).
-    // Skip audio events which also have no textEvent/sysEvent.
-    if (eventType === undefined) {
-      if (event.audioEvent) return
-      // Tap = execute selected action
-      const selected = ACTIONS[selectedIndex]
-      const cmd = selected.command()
-      addLog('ACTION', `${selected.label} (${cmd})`)
-      await sendCommand(cmd)
-      await updateDisplay(bridge)
-      return
-    }
+    // Skip events with no eventType (audio events, empty hub events)
+    if (eventType === undefined) return
 
     const now = Date.now()
 
