@@ -4,8 +4,68 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>G2 Media Controller</title>
+    <style>
+      * { margin: 0; padding: 0; box-sizing: border-box; }
+      body {
+        font-family: -apple-system, system-ui, sans-serif;
+        background: #111; color: #eee;
+        padding: 16px; max-width: 480px; margin: 0 auto;
+      }
+      h1 { font-size: 18px; margin-bottom: 12px; }
+      .status-row {
+        display: flex; gap: 8px; align-items: center;
+        margin-bottom: 8px; font-size: 14px;
+      }
+      .dot {
+        width: 10px; height: 10px; border-radius: 50%;
+        display: inline-block; flex-shrink: 0;
+      }
+      .dot.green { background: #4caf50; }
+      .dot.red { background: #f44336; }
+      .dot.yellow { background: #ff9800; }
+      .track-info {
+        background: #222; border-radius: 8px;
+        padding: 12px; margin: 12px 0;
+      }
+      .track-title { font-size: 16px; font-weight: 600; }
+      .track-artist { font-size: 13px; color: #aaa; margin-top: 4px; }
+      #log {
+        background: #1a1a1a; border-radius: 8px;
+        padding: 8px; margin-top: 12px;
+        font-family: monospace; font-size: 11px;
+        max-height: 300px; overflow-y: auto;
+        color: #8f8; white-space: pre-wrap;
+        word-break: break-all;
+      }
+      .log-error { color: #f66; }
+      .log-warn { color: #fa0; }
+      .section-label {
+        font-size: 12px; color: #888;
+        text-transform: uppercase; letter-spacing: 1px;
+        margin-top: 16px; margin-bottom: 4px;
+      }
+    </style>
   </head>
   <body>
+    <h1>G2 Media Controller</h1>
+
+    <div class="status-row">
+      <span class="dot" id="bridge-dot"></span>
+      <span id="bridge-status">Checking bridge...</span>
+    </div>
+    <div class="status-row">
+      <span class="dot" id="glasses-dot"></span>
+      <span id="glasses-status">Waiting for glasses...</span>
+    </div>
+
+    <div class="track-info">
+      <div class="track-title" id="track-title">--</div>
+      <div class="track-artist" id="track-artist"></div>
+    </div>
+
+    <div class="section-label">Event Log</div>
+    <div id="log"></div>
+
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>
