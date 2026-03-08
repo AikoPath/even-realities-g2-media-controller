@@ -15,8 +15,18 @@ const SCROLL_COOLDOWN_MS = 300
 
 type MediaCommand = 'play' | 'pause' | 'next' | 'prev' | 'vol-up' | 'vol-down' | 'status'
 
+// Action menu
+const ACTIONS: { label: string; command: () => MediaCommand }[] = [
+  { label: 'Play / Pause', command: () => isPlaying ? 'pause' : 'play' },
+  { label: 'Next Track',   command: () => 'next' },
+  { label: 'Prev Track',   command: () => 'prev' },
+  { label: 'Volume Up',    command: () => 'vol-up' },
+  { label: 'Volume Down',  command: () => 'vol-down' },
+]
+
 // State
 let isPlaying = false
+let selectedIndex = 0
 let lastScrollTime = 0
 let currentTrack = 'No media'
 let volume = -1
@@ -85,14 +95,14 @@ function updateMediaStatus() {
 
 function buildDisplayText(): string {
   const state = isPlaying ? '>' : '||'
-  const vol = volume >= 0 ? `Vol: ${volume}` : ''
-  return [
-    `${state} ${currentTrack}`,
-    '',
-    'Tap: Play/Pause',
-    'Double tap: Next',
-    `Scroll: Volume ${vol}`,
-  ].join('\n')
+  const vol = volume >= 0 ? ` | Vol: ${volume}` : ''
+  const header = `${state} ${currentTrack}${vol}`
+
+  const menu = ACTIONS.map((a, i) =>
+    i === selectedIndex ? `> ${a.label}` : `  ${a.label}`
+  ).join('\n')
+
+  return `${header}\n\n${menu}`
 }
 
 async function updateDisplay(bridge: EvenAppBridge) {
@@ -160,6 +170,7 @@ async function main() {
   addLog('INIT', 'Initial status fetched, display updated')
 
   // Handle glasses events
+  // Scroll = navigate menu, Tap = execute selected action
   bridge.onEvenHubEvent(async (event: EvenHubEvent) => {
     const te = event.textEvent
     const se = event.sysEvent
@@ -170,30 +181,37 @@ async function main() {
     // Skip audio events which also have no textEvent/sysEvent.
     if (eventType === undefined) {
       if (event.audioEvent) return
-      const action = isPlaying ? 'pause' : 'play'
-      addLog('ACTION', `${action}`)
-      await sendCommand(action)
+      // Tap = execute selected action
+      const selected = ACTIONS[selectedIndex]
+      const cmd = selected.command()
+      addLog('ACTION', `${selected.label} (${cmd})`)
+      await sendCommand(cmd)
       await updateDisplay(bridge)
       return
     }
 
     const now = Date.now()
 
-    if (eventType === OsEventTypeList.DOUBLE_CLICK_EVENT) {
-      addLog('ACTION', 'Next track')
-      await sendCommand('next')
-    } else if (eventType === OsEventTypeList.CLICK_EVENT) {
-      const action = isPlaying ? 'pause' : 'play'
-      addLog('ACTION', `${action}`)
-      await sendCommand(action)
+    if (eventType === OsEventTypeList.CLICK_EVENT) {
+      // Tap = execute selected action
+      const selected = ACTIONS[selectedIndex]
+      const cmd = selected.command()
+      addLog('ACTION', `${selected.label} (${cmd})`)
+      await sendCommand(cmd)
     } else if (eventType === OsEventTypeList.SCROLL_TOP_EVENT && now - lastScrollTime > SCROLL_COOLDOWN_MS) {
       lastScrollTime = now
-      addLog('ACTION', 'Volume up')
-      await sendCommand('vol-up')
+      selectedIndex = (selectedIndex - 1 + ACTIONS.length) % ACTIONS.length
+      addLog('NAV', `Selected: ${ACTIONS[selectedIndex].label}`)
     } else if (eventType === OsEventTypeList.SCROLL_BOTTOM_EVENT && now - lastScrollTime > SCROLL_COOLDOWN_MS) {
       lastScrollTime = now
-      addLog('ACTION', 'Volume down')
-      await sendCommand('vol-down')
+      selectedIndex = (selectedIndex + 1) % ACTIONS.length
+      addLog('NAV', `Selected: ${ACTIONS[selectedIndex].label}`)
+    } else if (eventType === OsEventTypeList.DOUBLE_CLICK_EVENT) {
+      // Double tap also executes selected action (alternative trigger)
+      const selected = ACTIONS[selectedIndex]
+      const cmd = selected.command()
+      addLog('ACTION', `${selected.label} (${cmd})`)
+      await sendCommand(cmd)
     } else {
       addLog('EVENT', `unhandled eventType=${eventType}`)
       return
