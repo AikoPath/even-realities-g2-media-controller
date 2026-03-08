@@ -166,9 +166,12 @@ async function main() {
     const se = event.sysEvent
 
     const eventType = te?.eventType ?? se?.eventType
-    if (eventType === undefined) return
 
-    addLog('EVENT', `type=${eventType}`)
+    // Diagnostic: log raw event data so we can see what the hardware sends
+    addLog('RAW', JSON.stringify(event.jsonData ?? {}))
+    addLog('EVENT', `parsed eventType=${eventType} (CLICK=${OsEventTypeList.CLICK_EVENT} DOUBLE=${OsEventTypeList.DOUBLE_CLICK_EVENT} SCROLL_T=${OsEventTypeList.SCROLL_TOP_EVENT} SCROLL_B=${OsEventTypeList.SCROLL_BOTTOM_EVENT})`)
+
+    if (eventType === undefined) return
 
     const now = Date.now()
 
@@ -188,6 +191,7 @@ async function main() {
       addLog('ACTION', 'Volume down')
       await sendCommand('vol-down')
     } else {
+      addLog('EVENT', `unhandled eventType=${eventType}`)
       return
     }
 
