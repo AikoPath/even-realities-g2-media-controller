@@ -17,55 +17,44 @@ type MediaCommand = 'play' | 'pause' | 'next' | 'prev' | 'vol-up' | 'vol-down' |
 
 declare const __APP_VERSION__: string
 
-// Show version on phone UI
+// --- Phone UI ---
+
 const versionEl = document.getElementById('version')
 if (versionEl) versionEl.textContent = `v${__APP_VERSION__}`
-
-// Action menu (volume bar is separate, always at bottom)
-const ACTIONS: { label: string; command: () => MediaCommand }[] = [
-  { label: 'Play / Pause', command: () => isPlaying ? 'pause' : 'play' },
-  { label: 'Next Track',   command: () => 'next' },
-  { label: 'Prev Track',   command: () => 'prev' },
-]
-const VOLUME_INDEX = ACTIONS.length // selectedIndex == this means volume bar is selected
-
-// State
-let isPlaying = false
-let selectedIndex = 0
-let volumeMode = false
-let lastScrollTime = 0
-let currentTrack = 'No media'
-let volume = -1
-
-// --- Phone UI helpers ---
 
 function setStatus(id: string, dotClass: string, text: string) {
   const dot = document.getElementById(`dot-${id}`)
   const label = document.getElementById(`label-${id}`)
-  if (dot) {
-    dot.className = `status-dot ${dotClass}`
-  }
-  if (label) {
-    label.textContent = text
-  }
+  if (dot) dot.className = `status-dot ${dotClass}`
+  if (label) label.textContent = text
 }
 
 function addLog(action: string, detail: string = '') {
   const list = document.getElementById('log-list')
   if (!list) return
-  const now = new Date()
-  const time = now.toLocaleTimeString('en-GB', { hour12: false })
+  const time = new Date().toLocaleTimeString('en-GB', { hour12: false })
   const entry = document.createElement('div')
   entry.className = 'log-entry'
   entry.innerHTML = `<span class="log-time">${time}</span> <span class="log-action">${action}</span>${detail ? ` <span class="log-detail">${detail}</span>` : ''}`
   list.insertBefore(entry, list.firstChild)
-  // Keep max 200 entries
-  while (list.children.length > 200) {
-    list.removeChild(list.lastChild!)
+  while (list.children.length > 200) list.removeChild(list.lastChild!)
+}
+
+function updateMediaStatus() {
+  if (currentTrack === 'Bridge offline') {
+    setStatus('media', 'dot-gray', 'Media: unknown')
+  } else if (isPlaying) {
+    setStatus('media', 'dot-green', `Media: playing - ${currentTrack}`)
+  } else {
+    setStatus('media', 'dot-yellow', `Media: paused - ${currentTrack}`)
   }
 }
 
 // --- Bridge communication ---
+
+let isPlaying = false
+let currentTrack = 'No media'
+let volume = -1
 
 async function sendCommand(cmd: MediaCommand): Promise<void> {
   try {
@@ -89,38 +78,113 @@ async function sendCommand(cmd: MediaCommand): Promise<void> {
   }
 }
 
-function updateMediaStatus() {
-  if (currentTrack === 'Bridge offline') {
-    setStatus('media', 'dot-gray', 'Media: unknown')
-  } else if (isPlaying) {
-    setStatus('media', 'dot-green', `Media: playing - ${currentTrack}`)
-  } else {
-    setStatus('media', 'dot-yellow', `Media: paused - ${currentTrack}`)
+// --- Input parsing ---
+
+type Action = 'tap' | 'double-tap' | 'scroll-up' | 'scroll-down'
+
+let lastScrollTime = 0
+
+function parseEvent(event: EvenHubEvent): Action | null {
+  if (event.audioEvent) return null
+
+  const eventType = event.textEvent?.eventType ?? event.sysEvent?.eventType
+
+  // CLICK_EVENT = 0, SDK fromJson normalizes 0 to undefined
+  if (eventType === undefined || eventType === OsEventTypeList.CLICK_EVENT) return 'tap'
+  if (eventType === OsEventTypeList.DOUBLE_CLICK_EVENT) return 'double-tap'
+
+  const now = Date.now()
+  if (eventType === OsEventTypeList.SCROLL_TOP_EVENT) {
+    if (now - lastScrollTime < SCROLL_COOLDOWN_MS) return null
+    lastScrollTime = now
+    return 'scroll-up'
+  }
+  if (eventType === OsEventTypeList.SCROLL_BOTTOM_EVENT) {
+    if (now - lastScrollTime < SCROLL_COOLDOWN_MS) return null
+    lastScrollTime = now
+    return 'scroll-down'
+  }
+
+  return null
+}
+
+// --- State machine ---
+
+const MENU_ITEMS: { label: string; command: () => MediaCommand }[] = [
+  { label: 'Play / Pause', command: () => isPlaying ? 'pause' : 'play' },
+  { label: 'Next Track',   command: () => 'next' },
+  { label: 'Prev Track',   command: () => 'prev' },
+]
+const VOLUME_ITEM_INDEX = MENU_ITEMS.length
+const TOTAL_ITEMS = MENU_ITEMS.length + 1 // +1 for volume bar
+
+type Mode =
+  | { type: 'menu'; selected: number }
+  | { type: 'volume' }
+
+let mode: Mode = { type: 'menu', selected: 0 }
+
+async function handleAction(action: Action): Promise<void> {
+  if (mode.type === 'menu') {
+    if (action === 'scroll-up') {
+      mode.selected = (mode.selected + 1) % TOTAL_ITEMS
+      const name = mode.selected === VOLUME_ITEM_INDEX ? 'Volume' : MENU_ITEMS[mode.selected].label
+      addLog('NAV', `Selected: ${name}`)
+    } else if (action === 'scroll-down') {
+      mode.selected = (mode.selected - 1 + TOTAL_ITEMS) % TOTAL_ITEMS
+      const name = mode.selected === VOLUME_ITEM_INDEX ? 'Volume' : MENU_ITEMS[mode.selected].label
+      addLog('NAV', `Selected: ${name}`)
+    } else if (action === 'tap') {
+      if (mode.selected === VOLUME_ITEM_INDEX) {
+        mode = { type: 'volume' }
+        addLog('VOL', 'Entered volume mode')
+        await sendCommand('status')
+      } else {
+        const item = MENU_ITEMS[mode.selected]
+        const cmd = item.command()
+        addLog('ACTION', `${item.label} (${cmd})`)
+        await sendCommand(cmd)
+      }
+    }
+    // double-tap ignored in menu mode
+  } else if (mode.type === 'volume') {
+    if (action === 'scroll-up') {
+      addLog('VOL', 'Volume up')
+      await sendCommand('vol-up')
+    } else if (action === 'scroll-down') {
+      addLog('VOL', 'Volume down')
+      await sendCommand('vol-down')
+    } else if (action === 'double-tap') {
+      mode = { type: 'menu', selected: VOLUME_ITEM_INDEX }
+      addLog('VOL', 'Exited volume mode')
+    }
+    // tap ignored in volume mode
   }
 }
+
+// --- Glasses display ---
 
 function buildVolumeBar(): string {
   if (volume < 0) return ''
   const pct = Math.round((volume / 160) * 100)
   const maxBlocks = 15
   const filled = Math.round((pct / 100) * maxBlocks)
-  const bar = '\u2588'.repeat(filled) + '\u2591'.repeat(maxBlocks - filled)
+  const bar = '\u2501'.repeat(filled) + '\u2500'.repeat(maxBlocks - filled)
   return `[${bar}] ${pct}%`
 }
 
 function buildDisplayText(): string {
   const state = isPlaying ? '>' : '||'
   const header = `${state} ${currentTrack}`
-  const volBar = buildVolumeBar()
+  const selected = mode.type === 'menu' ? mode.selected : -1
 
-  const menu = ACTIONS.map((a, i) =>
-    i === selectedIndex ? `> ${a.label}` : `  ${a.label}`
+  const menu = MENU_ITEMS.map((item, i) =>
+    i === selected ? `> ${item.label}` : `  ${item.label}`
   ).join('\n')
 
-  const volSelected = selectedIndex === VOLUME_INDEX
-  const volLine = volSelected
-    ? `> ${volBar || 'Volume'}`
-    : `  ${volBar || 'Volume'}`
+  const volBar = buildVolumeBar()
+  const volCursor = mode.type === 'volume' || selected === VOLUME_ITEM_INDEX ? '>' : ' '
+  const volLine = `${volCursor} ${volBar || 'Volume'}`
 
   return `${header}\n\n${menu}\n${volLine}`
 }
@@ -148,7 +212,6 @@ async function main() {
   addLog('INIT', 'Bridge ready')
   setStatus('glasses', 'dot-green', 'Glasses: connected')
 
-  // Watch glasses connection status
   bridge.onDeviceStatusChanged((status: DeviceStatus) => {
     const ct = status.connectType
     if (ct === 'none') return
@@ -164,86 +227,32 @@ async function main() {
     }
   })
 
-  // Create page
-  const textContainer = new TextContainerProperty({
-    containerID: 1,
-    containerName: 'media-info',
-    xPosition: 0,
-    yPosition: 0,
-    width: 576,
-    height: 288,
-    content: buildDisplayText(),
-    isEventCapture: 1,
-    borderWidth: 0,
-  })
-
   await bridge.createStartUpPageContainer(
     new CreateStartUpPageContainer({
       containerTotalNum: 1,
-      textObject: [textContainer],
+      textObject: [new TextContainerProperty({
+        containerID: 1,
+        containerName: 'media-info',
+        xPosition: 0,
+        yPosition: 0,
+        width: 576,
+        height: 288,
+        content: buildDisplayText(),
+        isEventCapture: 1,
+        borderWidth: 0,
+      })],
     })
   )
 
-  // Fetch initial status
   await sendCommand('status')
   await updateDisplay(bridge)
-  addLog('INIT', 'Initial status fetched, display updated')
+  addLog('INIT', 'Ready')
 
-  // Handle glasses events
-  // Scroll = navigate menu, Tap = execute selected action
   bridge.onEvenHubEvent(async (event: EvenHubEvent) => {
-    const te = event.textEvent
-    const se = event.sysEvent
+    const action = parseEvent(event)
+    if (!action) return
 
-    const eventType = te?.eventType ?? se?.eventType
-
-    // Skip events with no eventType (audio events, empty hub events)
-    if (eventType === undefined) return
-
-    const now = Date.now()
-
-    const totalItems = ACTIONS.length + 1 // +1 for volume bar
-
-    if (eventType === OsEventTypeList.CLICK_EVENT) {
-      if (selectedIndex === VOLUME_INDEX) {
-        // Tap on volume bar enters volume mode
-        volumeMode = true
-        addLog('VOL', 'Entered volume mode')
-        await sendCommand('status')
-      } else {
-        const selected = ACTIONS[selectedIndex]
-        const cmd = selected.command()
-        addLog('ACTION', `${selected.label} (${cmd})`)
-        await sendCommand(cmd)
-      }
-    } else if (eventType === OsEventTypeList.DOUBLE_CLICK_EVENT) {
-      if (volumeMode) {
-        volumeMode = false
-        addLog('VOL', 'Exited volume mode')
-      }
-    } else if (eventType === OsEventTypeList.SCROLL_TOP_EVENT && now - lastScrollTime > SCROLL_COOLDOWN_MS) {
-      lastScrollTime = now
-      if (volumeMode) {
-        addLog('VOL', 'Volume up')
-        await sendCommand('vol-up')
-      } else {
-        selectedIndex = (selectedIndex + 1) % totalItems
-        addLog('NAV', `Selected: ${selectedIndex === VOLUME_INDEX ? 'Volume' : ACTIONS[selectedIndex].label}`)
-      }
-    } else if (eventType === OsEventTypeList.SCROLL_BOTTOM_EVENT && now - lastScrollTime > SCROLL_COOLDOWN_MS) {
-      lastScrollTime = now
-      if (volumeMode) {
-        addLog('VOL', 'Volume down')
-        await sendCommand('vol-down')
-      } else {
-        selectedIndex = (selectedIndex - 1 + totalItems) % totalItems
-        addLog('NAV', `Selected: ${selectedIndex === VOLUME_INDEX ? 'Volume' : ACTIONS[selectedIndex].label}`)
-      }
-    } else {
-      addLog('EVENT', `unhandled eventType=${eventType}`)
-      return
-    }
-
+    await handleAction(action)
     await updateDisplay(bridge)
   })
 }
