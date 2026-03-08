@@ -15,6 +15,12 @@ const SCROLL_COOLDOWN_MS = 300
 
 type MediaCommand = 'play' | 'pause' | 'next' | 'prev' | 'vol-up' | 'vol-down' | 'status'
 
+declare const __APP_VERSION__: string
+
+// Show version on phone UI
+const versionEl = document.getElementById('version')
+if (versionEl) versionEl.textContent = `v${__APP_VERSION__}`
+
 // Action menu
 const ACTIONS: { label: string; command: () => MediaCommand }[] = [
   { label: 'Play / Pause', command: () => isPlaying ? 'pause' : 'play' },
