@@ -149,11 +149,11 @@ async function handleAction(action: Action): Promise<void> {
     // double-tap ignored in menu mode
   } else if (mode.type === 'volume') {
     if (action === 'scroll-up') {
-      addLog('VOL', 'Volume up')
-      await sendCommand('vol-up')
-    } else if (action === 'scroll-down') {
       addLog('VOL', 'Volume down')
       await sendCommand('vol-down')
+    } else if (action === 'scroll-down') {
+      addLog('VOL', 'Volume up')
+      await sendCommand('vol-up')
     } else if (action === 'double-tap') {
       mode = { type: 'menu', selected: VOLUME_ITEM_INDEX }
       addLog('VOL', 'Exited volume mode')
@@ -183,8 +183,15 @@ function buildDisplayText(): string {
   ).join('\n')
 
   const volBar = buildVolumeBar()
-  const volCursor = mode.type === 'volume' || selected === VOLUME_ITEM_INDEX ? '>' : ' '
-  const volLine = `${volCursor} ${volBar || 'Volume'}`
+  const inVolumeMode = mode.type === 'volume'
+  let volLine: string
+  if (inVolumeMode) {
+    volLine = `>> ${volBar || 'Volume'} <<`
+  } else if (selected === VOLUME_ITEM_INDEX) {
+    volLine = `> ${volBar || 'Volume'}`
+  } else {
+    volLine = `  ${volBar || 'Volume'}`
+  }
 
   return `${header}\n\n${menu}\n${volLine}`
 }
