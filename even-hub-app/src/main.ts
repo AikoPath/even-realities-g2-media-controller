@@ -9,6 +9,7 @@ import {
   ImageContainerProperty,
   ImageRawDataUpdate,
   OsEventTypeList,
+  StartUpPageCreateResult,
   type EvenHubEvent,
   type EvenAppBridge,
 } from '@evenrealities/even_hub_sdk'
@@ -18,6 +19,39 @@ const BRIDGE_URL = `http://localhost:${BRIDGE_PORT}`
 const SCROLL_COOLDOWN_MS = 200
 
 type MediaCommand = 'play' | 'pause' | 'next' | 'prev' | 'vol-up' | 'vol-down' | 'status'
+
+// ── Phone-side UI helpers ──
+function log(msg: string, level: 'info' | 'warn' | 'error' = 'info') {
+  const el = document.getElementById('log')
+  if (!el) return
+  const time = new Date().toLocaleTimeString()
+  const cls = level === 'error' ? ' class="log-error"' : level === 'warn' ? ' class="log-warn"' : ''
+  el.innerHTML = `<div${cls}>[${time}] ${msg}</div>` + el.innerHTML
+  // Keep log manageable
+  if (el.children.length > 100) el.removeChild(el.lastChild!)
+}
+
+function updatePhoneUI() {
+  const titleEl = document.getElementById('track-title')
+  const artistEl = document.getElementById('track-artist')
+  if (titleEl) titleEl.textContent = title
+  if (artistEl) artistEl.textContent = artist
+}
+
+function setBridgeStatus(online: boolean) {
+  bridgeOnline = online
+  const dot = document.getElementById('bridge-dot')
+  const status = document.getElementById('bridge-status')
+  if (dot) dot.className = `dot ${online ? 'green' : 'red'}`
+  if (status) status.textContent = online ? 'Bridge connected' : 'Bridge offline'
+}
+
+function setGlassesStatus(status: string, color: 'green' | 'yellow' | 'red') {
+  const dot = document.getElementById('glasses-dot')
+  const el = document.getElementById('glasses-status')
+  if (dot) dot.className = `dot ${color}`
+  if (el) el.textContent = status
+}
 
 // ── State ──
 let isPlaying = false
@@ -29,6 +63,7 @@ let position = 0
 let duration = 0
 let lastScrollTime = 0
 let lastArtUrl = ''
+let bridgeOnline = false
 
 // UI mode: 'list' = normal action list, 'volume' = volume slider, 'seek' = seek slider
 type UIMode = 'list' | 'volume' | 'seek'
@@ -68,11 +103,17 @@ async function sendCommand(cmd: MediaCommand): Promise<StatusResponse | null> {
     if (res.ok) {
       const data = await res.json()
       updateStateFromResponse(data)
+      setBridgeStatus(true)
+      updatePhoneUI()
       return data
     }
-  } catch {
+    log(`${cmd}: HTTP ${res.status}`, 'warn')
+  } catch (e) {
+    setBridgeStatus(false)
     title = 'Bridge offline'
     artist = ''
+    updatePhoneUI()
+    log(`${cmd}: ${e}`, 'error')
   }
   return null
 }
@@ -84,8 +125,11 @@ async function sendSeek(pos: number): Promise<void> {
     if (res.ok) {
       const data = await res.json()
       updateStateFromResponse(data)
+      setBridgeStatus(true)
     }
-  } catch { /* ignore */ }
+  } catch (e) {
+    log(`seek: ${e}`, 'error')
+  }
 }
 
 async function sendVolSet(vol: number): Promise<void> {
@@ -95,8 +139,11 @@ async function sendVolSet(vol: number): Promise<void> {
     if (res.ok) {
       const data = await res.json()
       updateStateFromResponse(data)
+      setBridgeStatus(true)
     }
-  } catch { /* ignore */ }
+  } catch (e) {
+    log(`vol-set: ${e}`, 'error')
+  }
 }
 
 // ── Formatting helpers ──
@@ -291,45 +338,60 @@ async function fetchAndSendAlbumArt(bridge: EvenAppBridge): Promise<void> {
         imageData: grayBytes,
       })
     )
+    log('Album art updated')
   } catch {
-    // Album art is optional, ignore errors
+    // Album art is optional
   }
 }
 
 // ── Display update ──
 async function rebuildDisplay(bridge: EvenAppBridge): Promise<void> {
-  if (uiMode === 'list') {
-    await bridge.rebuildPageContainer(buildListPage())
-    fetchAndSendAlbumArt(bridge)
-  } else {
-    await bridge.rebuildPageContainer(buildSliderPage())
-    fetchAndSendAlbumArt(bridge)
+  try {
+    if (uiMode === 'list') {
+      const ok = await bridge.rebuildPageContainer(buildListPage())
+      log(`rebuildDisplay(list): ${ok}`)
+      fetchAndSendAlbumArt(bridge)
+    } else {
+      const ok = await bridge.rebuildPageContainer(buildSliderPage())
+      log(`rebuildDisplay(${uiMode}): ${ok}`)
+      fetchAndSendAlbumArt(bridge)
+    }
+  } catch (e) {
+    log(`rebuildDisplay error: ${e}`, 'error')
   }
 }
 
 async function updateNowPlayingText(bridge: EvenAppBridge): Promise<void> {
-  await bridge.textContainerUpgrade(
-    new TextContainerUpgrade({
-      containerID: 2,
-      containerName: 'now-playing',
-      contentOffset: 0,
-      contentLength: 500,
-      content: getNowPlayingText(),
-    })
-  )
+  try {
+    await bridge.textContainerUpgrade(
+      new TextContainerUpgrade({
+        containerID: 2,
+        containerName: 'now-playing',
+        contentOffset: 0,
+        contentLength: 500,
+        content: getNowPlayingText(),
+      })
+    )
+  } catch (e) {
+    log(`updateNowPlayingText error: ${e}`, 'error')
+  }
 }
 
 async function updateSliderText(bridge: EvenAppBridge): Promise<void> {
   if (uiMode !== 'list') {
-    await bridge.textContainerUpgrade(
-      new TextContainerUpgrade({
-        containerID: 3,
-        containerName: 'slider-ctrl',
-        contentOffset: 0,
-        contentLength: 500,
-        content: getSliderText(),
-      })
-    )
+    try {
+      await bridge.textContainerUpgrade(
+        new TextContainerUpgrade({
+          containerID: 3,
+          containerName: 'slider-ctrl',
+          contentOffset: 0,
+          contentLength: 500,
+          content: getSliderText(),
+        })
+      )
+    } catch (e) {
+      log(`updateSliderText error: ${e}`, 'error')
+    }
   }
 }
 
@@ -339,6 +401,7 @@ async function handleListEvent(
   eventType: OsEventTypeList,
   itemIndex?: number,
 ): Promise<void> {
+  log(`handleListEvent: type=${eventType} index=${itemIndex}`)
   if (eventType === OsEventTypeList.CLICK_EVENT) {
     switch (itemIndex) {
       case ACTION_SEEK:
@@ -346,8 +409,6 @@ async function handleListEvent(
         await rebuildDisplay(bridge)
         break
       case ACTION_PLAY: {
-        // Toggle play state: send command, then force desired state
-        // (response may lag behind actual media state)
         const wantPlaying = !isPlaying
         await sendCommand(wantPlaying ? 'play' : 'pause')
         isPlaying = wantPlaying
@@ -366,6 +427,9 @@ async function handleListEvent(
         uiMode = 'volume'
         await rebuildDisplay(bridge)
         break
+      default:
+        log(`Unknown item index: ${itemIndex}`, 'warn')
+        break
     }
   }
 }
@@ -375,6 +439,7 @@ async function handleSliderEvent(
   eventType: OsEventTypeList,
 ): Promise<void> {
   const now = Date.now()
+  log(`handleSliderEvent: type=${eventType} mode=${uiMode}`)
 
   if (eventType === OsEventTypeList.DOUBLE_CLICK_EVENT) {
     uiMode = 'list'
@@ -404,12 +469,22 @@ async function handleSliderEvent(
 
 // ── Main ──
 async function main() {
+  log('Waiting for EvenAppBridge...')
+  setGlassesStatus('Initializing...', 'yellow')
+
   const bridge = await waitForEvenAppBridge()
+  log('Bridge ready')
+  setGlassesStatus('Glasses connected', 'green')
 
   // Initial status fetch
-  await sendCommand('status')
+  const statusResult = await sendCommand('status')
+  if (statusResult) {
+    log(`Status: playing=${isPlaying} vol=${volume}/${maxVolume} title="${title}"`)
+  } else {
+    log('Initial status fetch failed - bridge may be offline', 'warn')
+  }
 
-  // Create startup page with list layout
+  // Create startup page
   const items = getListItems()
   const { img, text } = buildTopContainers()
 
@@ -433,7 +508,7 @@ async function main() {
     }),
   })
 
-  await bridge.createStartUpPageContainer(
+  const createResult = await bridge.createStartUpPageContainer(
     new CreateStartUpPageContainer({
       containerTotalNum: 3,
       imageObject: [img],
@@ -442,23 +517,44 @@ async function main() {
     })
   )
 
+  const resultNames = ['success', 'invalid', 'oversize', 'outOfMemory']
+  log(`createStartUpPageContainer: ${resultNames[createResult] ?? createResult}`)
+
+  if (createResult !== StartUpPageCreateResult.success) {
+    log(`STARTUP PAGE FAILED: ${resultNames[createResult] ?? createResult}`, 'error')
+    setGlassesStatus(`Page create failed: ${resultNames[createResult]}`, 'red')
+    return
+  }
+
   // Send album art after startup
   fetchAndSendAlbumArt(bridge)
 
   // Event handler
   bridge.onEvenHubEvent(async (event: EvenHubEvent) => {
-    const le = event.listEvent
-    const te = event.textEvent
-    const se = event.sysEvent
+    try {
+      const le = event.listEvent
+      const te = event.textEvent
+      const se = event.sysEvent
 
-    if (uiMode === 'list') {
-      const eventType = le?.eventType ?? se?.eventType
-      if (eventType === undefined) return
-      await handleListEvent(bridge, eventType, le?.currentSelectItemIndex)
-    } else {
-      const eventType = te?.eventType ?? se?.eventType
-      if (eventType === undefined) return
-      await handleSliderEvent(bridge, eventType)
+      log(`Event: list=${!!le} text=${!!te} sys=${!!se} raw=${JSON.stringify(event.jsonData ?? {}).slice(0, 200)}`)
+
+      if (uiMode === 'list') {
+        const eventType = le?.eventType ?? se?.eventType
+        if (eventType === undefined) {
+          log('List mode: no eventType found, ignoring', 'warn')
+          return
+        }
+        await handleListEvent(bridge, eventType, le?.currentSelectItemIndex)
+      } else {
+        const eventType = te?.eventType ?? se?.eventType
+        if (eventType === undefined) {
+          log('Slider mode: no eventType found, ignoring', 'warn')
+          return
+        }
+        await handleSliderEvent(bridge, eventType)
+      }
+    } catch (e) {
+      log(`Event handler error: ${e}`, 'error')
     }
   })
 
@@ -474,4 +570,4 @@ async function main() {
   }, 5000)
 }
 
-main()
+main().catch(e => log(`main() crashed: ${e}`, 'error'))
