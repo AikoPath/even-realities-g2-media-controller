@@ -101,10 +101,11 @@ function updateMediaStatus() {
 
 function buildVolumeBar(): string {
   if (volume < 0) return ''
+  const pct = Math.round((volume / 160) * 100)
   const maxBlocks = 15
-  const filled = Math.round((volume / 15) * maxBlocks)
+  const filled = Math.round((pct / 100) * maxBlocks)
   const bar = '\u2588'.repeat(filled) + '\u2591'.repeat(maxBlocks - filled)
-  return `[${bar}] ${volume}`
+  return `[${bar}] ${pct}%`
 }
 
 function buildDisplayText(): string {
