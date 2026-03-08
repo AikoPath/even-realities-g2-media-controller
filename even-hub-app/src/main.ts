@@ -222,9 +222,11 @@ async function main() {
   // Event handler — text mode only
   bridge.onEvenHubEvent(async (event: EvenHubEvent) => {
     try {
+      const le = event.listEvent
       const te = event.textEvent
       const se = event.sysEvent
-      const eventType = te?.eventType ?? se?.eventType
+      log(`[RAW] list=${JSON.stringify(le)} text=${JSON.stringify(te)} sys=${JSON.stringify(se)} json=${JSON.stringify(event.jsonData ?? {}).slice(0, 300)}`)
+      const eventType = te?.eventType ?? se?.eventType ?? le?.eventType
       if (eventType === undefined) return
       log(`Event: type=${eventType}`)
       await handleEvent(bridge, eventType)
