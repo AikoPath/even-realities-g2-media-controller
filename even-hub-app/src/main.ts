@@ -119,7 +119,7 @@ async function main() {
   setStatus('glasses', 'dot-green', 'Glasses: connected')
 
   // Watch glasses connection status
-  bridge.onDeviceStatusChanged((status: DeviceStatus) => {
+  bridge.onDeviceStatusChanged(async (status: DeviceStatus) => {
     const ct = status.connectType
     addLog('DEVICE', `status=${ct}, battery=${status.batteryLevel ?? '?'}%, wearing=${status.isWearing ?? '?'}`)
     if (ct === 'connected') {
@@ -131,7 +131,13 @@ async function main() {
     } else if (ct === 'connectionFailed') {
       setStatus('glasses', 'dot-red', 'Glasses: connection failed')
     }
-    // Ignore 'none' and other unknown values — don't update UI for spurious statuses
+    // Single tap arrives here as connectType='none' instead of onEvenHubEvent
+    if (ct === 'none') {
+      const action = isPlaying ? 'pause' : 'play'
+      addLog('ACTION', `${action} (single tap via status)`)
+      await sendCommand(action)
+      await updateDisplay(bridge)
+    }
   })
 
   // Create page
