@@ -36,8 +36,6 @@ let volumeMode = false
 let lastScrollTime = 0
 let currentTrack = 'No media'
 let volume = -1
-let clickTimer: ReturnType<typeof setTimeout> | null = null
-const DOUBLE_TAP_WINDOW_MS = 400
 
 // --- Phone UI helpers ---
 
@@ -115,18 +113,13 @@ function buildDisplayText(): string {
   const header = `${state} ${currentTrack}`
   const volBar = buildVolumeBar()
 
-  const menu = ACTIONS.map((a, i) => {
-    const cursor = i === selectedIndex ? '>' : ' '
-    if (a.label === 'Volume') {
-      if (volumeMode && i === selectedIndex) {
-        return `${cursor} ${volBar || 'Volume'}`
-      }
-      return `${cursor} Vol ${volBar || ''}`
-    }
-    return `${cursor} ${a.label}`
-  }).join('\n')
+  const menu = ACTIONS.map((a, i) =>
+    i === selectedIndex ? `> ${a.label}` : `  ${a.label}`
+  ).join('\n')
 
-  return `${header}\n\n${menu}`
+  const bottom = volumeMode ? `\n${volBar}` : ''
+
+  return `${header}\n\n${menu}${bottom}`
 }
 
 async function updateDisplay(bridge: EvenAppBridge) {
@@ -207,34 +200,20 @@ async function main() {
     const now = Date.now()
 
     if (eventType === OsEventTypeList.CLICK_EVENT) {
-      // Delay single tap to distinguish from double tap
-      if (clickTimer) clearTimeout(clickTimer)
-      clickTimer = setTimeout(async () => {
-        clickTimer = null
-        if (ACTIONS[selectedIndex].label === 'Volume' && !volumeMode) {
-          volumeMode = true
-          addLog('VOL', 'Entered volume mode')
-          await sendCommand('status')
-        } else {
-          const selected = ACTIONS[selectedIndex]
-          const cmd = selected.command()
-          addLog('ACTION', `${selected.label} (${cmd})`)
-          await sendCommand(cmd)
-        }
-        await updateDisplay(bridge)
-      }, DOUBLE_TAP_WINDOW_MS)
-      return
-    } else if (eventType === OsEventTypeList.DOUBLE_CLICK_EVENT) {
-      // Cancel pending single tap
-      if (clickTimer) { clearTimeout(clickTimer); clickTimer = null }
-      if (volumeMode) {
-        volumeMode = false
-        addLog('VOL', 'Exited volume mode')
+      if (ACTIONS[selectedIndex].label === 'Volume' && !volumeMode) {
+        volumeMode = true
+        addLog('VOL', 'Entered volume mode')
+        await sendCommand('status')
       } else {
         const selected = ACTIONS[selectedIndex]
         const cmd = selected.command()
         addLog('ACTION', `${selected.label} (${cmd})`)
         await sendCommand(cmd)
+      }
+    } else if (eventType === OsEventTypeList.DOUBLE_CLICK_EVENT) {
+      if (volumeMode) {
+        volumeMode = false
+        addLog('VOL', 'Exited volume mode')
       }
     } else if (eventType === OsEventTypeList.SCROLL_TOP_EVENT && now - lastScrollTime > SCROLL_COOLDOWN_MS) {
       lastScrollTime = now
