@@ -32,3 +32,12 @@ google-services.json
 
 # Android Profiling
 *.hprof
+
+# Node
+node_modules/
+dist/
+*.ehpk
+
+# OS
+.DS_Store
+Thumbs.db

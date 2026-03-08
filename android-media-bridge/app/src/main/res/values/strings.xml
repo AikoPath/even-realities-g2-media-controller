@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Media Bridge</string>
+    <string name="channel_name">Media Bridge Service</string>
+    <string name="channel_description">Keeps the media bridge HTTP server running</string>
+</resources>

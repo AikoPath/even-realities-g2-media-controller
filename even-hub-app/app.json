@@ -1,0 +1,10 @@
+{
+  "package_id": "com.aikopath.mediacontroller",
+  "edition": "202603",
+  "name": "Media Controller",
+  "version": "1.0.0",
+  "entrypoint": "index.html",
+  "permissions": {
+    "network": ["localhost"]
+  }
+}
