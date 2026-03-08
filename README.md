@@ -59,7 +59,7 @@ npm run dev
 For development, generate a QR code to sideload into the Even App:
 
 ```bash
-npx evenhub qr --url "http://YOUR_LOCAL_IP:5173"
+npx @evenrealities/evenhub-cli qr --url "http://YOUR_LOCAL_IP:5173"
 ```
 
 The production version auto-deploys to GitHub Pages on push to `main`.

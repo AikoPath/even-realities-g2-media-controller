@@ -4,14 +4,18 @@ import android.app.*
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
+import android.graphics.Bitmap
 import android.media.AudioManager
+import android.media.MediaMetadata
 import android.media.session.MediaController
 import android.media.session.MediaSessionManager
 import android.media.session.PlaybackState
 import android.os.Build
 import android.os.IBinder
+import android.util.Base64
 import androidx.core.app.NotificationCompat
 import fi.iki.elonen.NanoHTTPD
+import java.io.ByteArrayOutputStream
 
 class MediaBridgeService : Service() {
 
@@ -80,7 +84,10 @@ class MediaBridgeService : Service() {
  *   /prev      - skip to previous track
  *   /vol-up    - increase media volume
  *   /vol-down  - decrease media volume
+ *   /vol-set?v=N - set volume to N (0..maxVolume)
+ *   /seek?pos=N  - seek to position N (milliseconds)
  *   /status    - get current playback state
+ *   /art       - get album art as base64 PNG
  */
 class MediaHttpServer(
     port: Int,
@@ -88,7 +95,6 @@ class MediaHttpServer(
 ) : NanoHTTPD("127.0.0.1", port) {
 
     override fun serve(session: IHTTPSession): Response {
-        // CORS headers for WebView fetch() calls
         val headers = mutableMapOf(
             "Access-Control-Allow-Origin" to "*",
             "Access-Control-Allow-Methods" to "POST, GET, OPTIONS",
@@ -105,6 +111,13 @@ class MediaHttpServer(
         val transport = controller?.transportControls
         val audio = service.getAudioManager()
 
+        // Parse query parameters
+        val params = mutableMapOf<String, String>()
+        session.queryParameterString?.split("&")?.forEach { pair ->
+            val parts = pair.split("=", limit = 2)
+            if (parts.size == 2) params[parts[0]] = parts[1]
+        }
+
         when (session.uri) {
             "/play" -> transport?.play()
             "/pause" -> transport?.pause()
@@ -120,7 +133,31 @@ class MediaHttpServer(
                 AudioManager.ADJUST_LOWER,
                 0
             )
-            "/status" -> {} // just return current state below
+            "/vol-set" -> {
+                val v = params["v"]?.toIntOrNull()
+                if (v != null) {
+                    val max = audio.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
+                    audio.setStreamVolume(
+                        AudioManager.STREAM_MUSIC,
+                        v.coerceIn(0, max),
+                        0
+                    )
+                }
+            }
+            "/seek" -> {
+                val pos = params["pos"]?.toLongOrNull()
+                if (pos != null) transport?.seekTo(pos)
+            }
+            "/art" -> {
+                val artBase64 = getAlbumArtBase64(controller, 80, 80)
+                val json = if (artBase64 != null) {
+                    """{"art":"$artBase64"}"""
+                } else {
+                    """{"art":null}"""
+                }
+                return jsonResponse(json, headers)
+            }
+            "/status" -> {}
             else -> return jsonResponse("""{"error":"unknown command"}""", headers)
         }
 
@@ -128,14 +165,37 @@ class MediaHttpServer(
         val state = controller?.playbackState
         val metadata = controller?.metadata
         val isPlaying = state?.state == PlaybackState.STATE_PLAYING
-        val track = metadata?.getString(android.media.MediaMetadata.METADATA_KEY_TITLE) ?: "Unknown"
-        val artist = metadata?.getString(android.media.MediaMetadata.METADATA_KEY_ARTIST) ?: ""
-        val displayTrack = if (artist.isNotEmpty()) "$artist - $track" else track
+        val title = metadata?.getString(MediaMetadata.METADATA_KEY_TITLE) ?: "Unknown"
+        val artist = metadata?.getString(MediaMetadata.METADATA_KEY_ARTIST) ?: ""
+        val position = state?.position ?: 0L
+        val duration = metadata?.getLong(MediaMetadata.METADATA_KEY_DURATION) ?: 0L
         val volume = audio.getStreamVolume(AudioManager.STREAM_MUSIC)
         val maxVolume = audio.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
 
-        val json = """{"playing":$isPlaying,"track":"${escapeJson(displayTrack)}","volume":$volume,"maxVolume":$maxVolume}"""
+        val json = buildString {
+            append("{")
+            append("\"playing\":$isPlaying,")
+            append("\"title\":\"${escapeJson(title)}\",")
+            append("\"artist\":\"${escapeJson(artist)}\",")
+            append("\"position\":$position,")
+            append("\"duration\":$duration,")
+            append("\"volume\":$volume,")
+            append("\"maxVolume\":$maxVolume")
+            append("}")
+        }
         return jsonResponse(json, headers)
+    }
+
+    private fun getAlbumArtBase64(controller: MediaController?, width: Int, height: Int): String? {
+        val metadata = controller?.metadata ?: return null
+        val bitmap = metadata.getBitmap(MediaMetadata.METADATA_KEY_ART)
+            ?: metadata.getBitmap(MediaMetadata.METADATA_KEY_ALBUM_ART)
+            ?: return null
+        val scaled = Bitmap.createScaledBitmap(bitmap, width, height, true)
+        val stream = ByteArrayOutputStream()
+        scaled.compress(Bitmap.CompressFormat.PNG, 100, stream)
+        if (scaled !== bitmap) scaled.recycle()
+        return Base64.encodeToString(stream.toByteArray(), Base64.NO_WRAP)
     }
 
     private fun jsonResponse(json: String, headers: Map<String, String>): Response {
