@@ -104,7 +104,7 @@ function buildVolumeBar(): string {
   const pct = Math.round((volume / 160) * 100)
   const maxBlocks = 15
   const filled = Math.round((pct / 100) * maxBlocks)
-  const bar = '='.repeat(filled) + '.'.repeat(maxBlocks - filled)
+  const bar = '\u2588'.repeat(filled) + '\u2591'.repeat(maxBlocks - filled)
   return `[${bar}] ${pct}%`
 }
 
