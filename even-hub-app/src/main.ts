@@ -37,24 +37,20 @@ function updatePhoneUI() {
   if (artistEl) artistEl.textContent = artist
 }
 
+const DOT_COLORS = { green: '#4caf50', red: '#f44336', yellow: '#ff9800' }
+
 function setBridgeStatus(online: boolean) {
   bridgeOnline = online
   const dot = document.getElementById('bridge-dot')
   const status = document.getElementById('bridge-status')
-  if (dot) {
-    dot.className = 'dot'
-    dot.classList.add(online ? 'green' : 'red')
-  }
+  if (dot) dot.style.backgroundColor = online ? DOT_COLORS.green : DOT_COLORS.red
   if (status) status.textContent = online ? 'Bridge connected' : 'Bridge offline'
 }
 
 function setGlassesStatus(msg: string, color: 'green' | 'yellow' | 'red') {
   const dot = document.getElementById('glasses-dot')
   const el = document.getElementById('glasses-status')
-  if (dot) {
-    dot.className = 'dot'
-    dot.classList.add(color)
-  }
+  if (dot) dot.style.backgroundColor = DOT_COLORS[color]
   if (el) el.textContent = msg
 }
 
