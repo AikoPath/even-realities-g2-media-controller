@@ -205,25 +205,13 @@ async function main() {
   }
   log(`createStartUpPageContainer: ${resultNames[createResult] ?? createResult} (raw=${createResult})`)
 
-  // "invalid" means page exists from previous session — shut down and recreate
+  // "invalid" means page exists from previous session — that's fine, reuse it
   if (createResult === StartUpPageCreateResult.invalid) {
-    log('Stale page — shutting down and recreating...')
-    try {
-      await bridge.shutDownPageContainer(0)
-    } catch (e) {
-      log(`shutDownPageContainer threw: ${e}`, 'error')
-    }
-    await new Promise(r => setTimeout(r, 500))
-    try {
-      createResult = await bridge.createStartUpPageContainer(startupPage)
-      log(`Re-create: ${resultNames[createResult] ?? createResult} (raw=${createResult})`)
-    } catch (e) {
-      log(`Re-create threw: ${e}`, 'error')
-      createResult = -1
-    }
+    log('Page exists from previous session — reusing')
+    await updateGlassesText(bridge)
   }
 
-  if (createResult === StartUpPageCreateResult.success) {
+  if (createResult === StartUpPageCreateResult.success || createResult === StartUpPageCreateResult.invalid) {
     log('Glasses display ready')
     setGlassesStatus('Glasses connected', 'green')
   } else {
@@ -234,9 +222,11 @@ async function main() {
   // Event handler — text mode only
   bridge.onEvenHubEvent(async (event: EvenHubEvent) => {
     try {
+      const le = event.listEvent
       const te = event.textEvent
       const se = event.sysEvent
-      const eventType = te?.eventType ?? se?.eventType
+      log(`[RAW] list=${JSON.stringify(le)} text=${JSON.stringify(te)} sys=${JSON.stringify(se)} json=${JSON.stringify(event.jsonData ?? {}).slice(0, 300)}`)
+      const eventType = te?.eventType ?? se?.eventType ?? le?.eventType
       if (eventType === undefined) return
       log(`Event: type=${eventType}`)
       await handleEvent(bridge, eventType)
