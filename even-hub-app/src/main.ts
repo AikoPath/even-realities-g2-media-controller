@@ -18,7 +18,6 @@ type MediaCommand = 'play' | 'pause' | 'next' | 'prev' | 'vol-up' | 'vol-down' |
 // State
 let isPlaying = false
 let lastScrollTime = 0
-let bridgeReady = false
 let currentTrack = 'No media'
 let volume = -1
 
@@ -120,8 +119,9 @@ async function main() {
   setStatus('glasses', 'dot-green', 'Glasses: connected')
 
   // Watch glasses connection status
-  bridge.onDeviceStatusChanged(async (status: DeviceStatus) => {
+  bridge.onDeviceStatusChanged((status: DeviceStatus) => {
     const ct = status.connectType
+    if (ct === 'none') return
     addLog('DEVICE', `status=${ct}, battery=${status.batteryLevel ?? '?'}%, wearing=${status.isWearing ?? '?'}`)
     if (ct === 'connected') {
       setStatus('glasses', 'dot-green', `Glasses: connected${status.batteryLevel !== undefined ? ` (${status.batteryLevel}%)` : ''}`)
@@ -131,15 +131,6 @@ async function main() {
       setStatus('glasses', 'dot-red', 'Glasses: disconnected')
     } else if (ct === 'connectionFailed') {
       setStatus('glasses', 'dot-red', 'Glasses: connection failed')
-    }
-    // Firmware bug: single tap arrives here as connectType='none' instead of
-    // onEvenHubEvent with CLICK_EVENT=0. The simulator sends it correctly;
-    // only real hardware has this issue. Treat 'none' as play/pause once ready.
-    if (ct === 'none' && bridgeReady) {
-      const action = isPlaying ? 'pause' : 'play'
-      addLog('ACTION', `${action} (single tap)`)
-      await sendCommand(action)
-      await updateDisplay(bridge)
     }
   })
 
@@ -167,7 +158,6 @@ async function main() {
   await sendCommand('status')
   await updateDisplay(bridge)
   addLog('INIT', 'Initial status fetched, display updated')
-  bridgeReady = true
 
   // Handle glasses events
   bridge.onEvenHubEvent(async (event: EvenHubEvent) => {
@@ -176,11 +166,16 @@ async function main() {
 
     const eventType = te?.eventType ?? se?.eventType
 
-    // Diagnostic: log raw event data so we can see what the hardware sends
-    addLog('RAW', JSON.stringify(event.jsonData ?? {}))
-    addLog('EVENT', `parsed eventType=${eventType} (CLICK=${OsEventTypeList.CLICK_EVENT} DOUBLE=${OsEventTypeList.DOUBLE_CLICK_EVENT} SCROLL_T=${OsEventTypeList.SCROLL_TOP_EVENT} SCROLL_B=${OsEventTypeList.SCROLL_BOTTOM_EVENT})`)
-
-    if (eventType === undefined) return
+    // Firmware sends single tap as empty evenHubEvent (no eventType).
+    // Skip audio events which also have no textEvent/sysEvent.
+    if (eventType === undefined) {
+      if (event.audioEvent) return
+      const action = isPlaying ? 'pause' : 'play'
+      addLog('ACTION', `${action}`)
+      await sendCommand(action)
+      await updateDisplay(bridge)
+      return
+    }
 
     const now = Date.now()
 
