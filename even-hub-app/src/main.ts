@@ -66,6 +66,16 @@ let lastScrollTime = 0
 let lastArtUrl = ''
 let bridgeOnline = false
 
+type UIMode = 'list' | 'volume' | 'seek'
+let uiMode: UIMode = 'list'
+
+// ── Action items for the list ──
+const ACTION_SEEK = 0
+const ACTION_PLAY = 1
+const ACTION_NEXT = 2
+const ACTION_PREV = 3
+const ACTION_VOL = 4
+
 // ── Bridge communication ──
 interface StatusResponse {
   playing: boolean
@@ -137,6 +147,14 @@ async function sendVolSet(vol: number): Promise<void> {
 }
 
 // ── Formatting helpers ──
+const LIST_CHAR_WIDTH = 40
+
+function centerText(text: string, width: number = LIST_CHAR_WIDTH): string {
+  if (text.length >= width) return text
+  const pad = Math.floor((width - text.length) / 2)
+  return ' '.repeat(pad) + text
+}
+
 function formatTime(ms: number): string {
   const totalSec = Math.floor(ms / 1000)
   const min = Math.floor(totalSec / 60)
@@ -163,70 +181,356 @@ function seekFraction(): number {
   return duration > 0 ? Math.min(position / duration, 1) : 0
 }
 
+// Volume step: for high-range devices (maxVolume=160), step by ~5% instead of 1
 function volumeStep(): number {
   return Math.max(1, Math.round(maxVolume / 20))
 }
 
-// ── Glasses display text ──
-// This is the proven working format: single full-screen text container
-function buildDisplayText(): string {
-  const state = isPlaying ? '\u25B6' : '\u23F8'
-  const vol = volumePercent()
+// ── List item labels ──
+function getListItems(): string[] {
+  const playLabel = isPlaying ? '\u23F8 Pause' : '\u25B6 Play'
+  const volBar = buildBar(volumeFraction(), 10)
+  const volPct = volumePercent()
+  const posStr = formatTime(position)
+  const durStr = formatTime(duration)
+  const seekBar = buildBar(seekFraction(), 10)
+
   return [
-    `${state} ${title}`,
-    artist ? artist : '',
-    '',
-    'Tap: Play/Pause',
-    'Double tap: Next',
-    `Scroll: Volume ${vol}%`,
-  ].filter(l => l !== '' || true).join('\n')
+    centerText(`${posStr} ${seekBar} ${durStr}`),
+    centerText(playLabel),
+    centerText('\u23ED Next'),
+    centerText('\u23EE Previous'),
+    centerText(`\u266B Vol ${volBar} ${volPct}%`),
+  ]
 }
 
-// ── Display update (text upgrade only — no rebuild needed) ──
-async function updateDisplay(bridge: EvenAppBridge): Promise<void> {
+// ── Now-playing text ──
+function getNowPlayingText(): string {
+  const state = isPlaying ? '\u25B6' : '\u23F8'
+  const line1 = `${state} ${title}`
+  return artist ? `${line1}\n${artist}` : line1
+}
+
+// ── Slider mode text ──
+function getSliderText(): string {
+  if (uiMode === 'volume') {
+    const bar = buildBar(volumeFraction(), 20)
+    return `Volume\n${bar} ${volumePercent()}%\n\nScroll: adjust  2xTap: back`
+  } else {
+    const bar = buildBar(seekFraction(), 20)
+    return `Position\n${formatTime(position)} ${bar} ${formatTime(duration)}\n\nScroll: seek  2xTap: back`
+  }
+}
+
+// ── Page builders ──
+// Startup page: text + list only (no image — image containers cause "invalid" at startup)
+function buildStartupPage(): CreateStartUpPageContainer {
+  const items = getListItems()
+
+  const textContainer = new TextContainerProperty({
+    containerID: 1,
+    containerName: 'now-playing',
+    xPosition: 8,
+    yPosition: 8,
+    width: 560,
+    height: 80,
+    content: getNowPlayingText(),
+    isEventCapture: 0,
+    borderWidth: 0,
+  })
+
+  const listContainer = new ListContainerProperty({
+    containerID: 2,
+    containerName: 'actions',
+    xPosition: 0,
+    yPosition: 96,
+    width: 576,
+    height: 192,
+    borderWidth: 1,
+    borderColor: 8,
+    borderRdaius: 4,
+    paddingLength: 4,
+    isEventCapture: 1,
+    itemContainer: new ListItemContainerProperty({
+      itemCount: items.length,
+      itemWidth: 560,
+      isItemSelectBorderEn: 1,
+      itemName: items,
+    }),
+  })
+
+  return new CreateStartUpPageContainer({
+    containerTotalNum: 2,
+    textObject: [textContainer],
+    listObject: [listContainer],
+  })
+}
+
+// Rebuild pages include image container
+function buildListPage(): RebuildPageContainer {
+  const items = getListItems()
+
+  const imgContainer = new ImageContainerProperty({
+    containerID: 1,
+    containerName: 'album-art',
+    xPosition: 8,
+    yPosition: 8,
+    width: 80,
+    height: 80,
+  })
+
+  const textContainer = new TextContainerProperty({
+    containerID: 2,
+    containerName: 'now-playing',
+    xPosition: 96,
+    yPosition: 8,
+    width: 472,
+    height: 80,
+    content: getNowPlayingText(),
+    isEventCapture: 0,
+    borderWidth: 0,
+  })
+
+  const listContainer = new ListContainerProperty({
+    containerID: 3,
+    containerName: 'actions',
+    xPosition: 0,
+    yPosition: 96,
+    width: 576,
+    height: 192,
+    borderWidth: 1,
+    borderColor: 8,
+    borderRdaius: 4,
+    paddingLength: 4,
+    isEventCapture: 1,
+    itemContainer: new ListItemContainerProperty({
+      itemCount: items.length,
+      itemWidth: 560,
+      isItemSelectBorderEn: 1,
+      itemName: items,
+    }),
+  })
+
+  return new RebuildPageContainer({
+    containerTotalNum: 3,
+    imageObject: [imgContainer],
+    textObject: [textContainer],
+    listObject: [listContainer],
+  })
+}
+
+function buildSliderPage(): RebuildPageContainer {
+  const imgContainer = new ImageContainerProperty({
+    containerID: 1,
+    containerName: 'album-art',
+    xPosition: 8,
+    yPosition: 8,
+    width: 80,
+    height: 80,
+  })
+
+  const textContainer = new TextContainerProperty({
+    containerID: 2,
+    containerName: 'now-playing',
+    xPosition: 96,
+    yPosition: 8,
+    width: 472,
+    height: 80,
+    content: getNowPlayingText(),
+    isEventCapture: 0,
+    borderWidth: 0,
+  })
+
+  const sliderText = new TextContainerProperty({
+    containerID: 3,
+    containerName: 'slider-ctrl',
+    xPosition: 8,
+    yPosition: 96,
+    width: 560,
+    height: 184,
+    content: getSliderText(),
+    isEventCapture: 1,
+    borderWidth: 2,
+    borderColor: 12,
+    borderRdaius: 6,
+    paddingLength: 16,
+  })
+
+  return new RebuildPageContainer({
+    containerTotalNum: 3,
+    imageObject: [imgContainer],
+    textObject: [textContainer, sliderText],
+  })
+}
+
+// ── Album art ──
+async function fetchAndSendAlbumArt(bridge: EvenAppBridge): Promise<void> {
   try {
-    const ok = await bridge.textContainerUpgrade(
-      new TextContainerUpgrade({
+    const res = await fetch(`${BRIDGE_URL}/art`, { method: 'POST' })
+    if (!res.ok) return
+    const data = await res.json()
+    if (!data.art || data.art === lastArtUrl) return
+    lastArtUrl = data.art
+
+    const img = new Image()
+    img.crossOrigin = 'anonymous'
+    await new Promise<void>((resolve, reject) => {
+      img.onload = () => resolve()
+      img.onerror = () => reject()
+      img.src = `data:image/png;base64,${data.art}`
+    })
+
+    const canvas = document.createElement('canvas')
+    canvas.width = 80
+    canvas.height = 80
+    const ctx = canvas.getContext('2d')!
+    ctx.drawImage(img, 0, 0, 80, 80)
+    const imageData = ctx.getImageData(0, 0, 80, 80)
+
+    const pixels = imageData.data
+    const grayBytes: number[] = []
+    for (let i = 0; i < pixels.length; i += 4) {
+      const gray = Math.round(0.299 * pixels[i] + 0.587 * pixels[i + 1] + 0.114 * pixels[i + 2])
+      grayBytes.push(gray)
+    }
+
+    await bridge.updateImageRawData(
+      new ImageRawDataUpdate({
         containerID: 1,
-        containerName: 'media-info',
-        contentOffset: 0,
-        contentLength: 500,
-        content: buildDisplayText(),
+        containerName: 'album-art',
+        imageData: grayBytes,
       })
     )
-    log(`[DBG] textContainerUpgrade: ${ok}`)
+    log('Album art updated')
+  } catch {
+    // Album art is optional
+  }
+}
+
+// ── Display update ──
+async function rebuildDisplay(bridge: EvenAppBridge): Promise<void> {
+  try {
+    if (uiMode === 'list') {
+      const ok = await bridge.rebuildPageContainer(buildListPage())
+      log(`rebuildDisplay(list): ${ok}`)
+      fetchAndSendAlbumArt(bridge)
+    } else {
+      const ok = await bridge.rebuildPageContainer(buildSliderPage())
+      log(`rebuildDisplay(${uiMode}): ${ok}`)
+      fetchAndSendAlbumArt(bridge)
+    }
   } catch (e) {
-    log(`updateDisplay error: ${e}`, 'error')
+    log(`rebuildDisplay error: ${e}`, 'error')
+  }
+}
+
+async function updateNowPlayingText(bridge: EvenAppBridge): Promise<void> {
+  try {
+    // Container ID depends on whether we've rebuilt (with image) or still on startup
+    const id = uiMode === 'list' ? 2 : 2
+    await bridge.textContainerUpgrade(
+      new TextContainerUpgrade({
+        containerID: id,
+        containerName: 'now-playing',
+        contentOffset: 0,
+        contentLength: 500,
+        content: getNowPlayingText(),
+      })
+    )
+  } catch (e) {
+    log(`updateNowPlayingText error: ${e}`, 'error')
+  }
+}
+
+async function updateSliderText(bridge: EvenAppBridge): Promise<void> {
+  if (uiMode !== 'list') {
+    try {
+      await bridge.textContainerUpgrade(
+        new TextContainerUpgrade({
+          containerID: 3,
+          containerName: 'slider-ctrl',
+          contentOffset: 0,
+          contentLength: 500,
+          content: getSliderText(),
+        })
+      )
+    } catch (e) {
+      log(`updateSliderText error: ${e}`, 'error')
+    }
   }
 }
 
 // ── Event handling ──
-async function handleEvent(
+async function handleListEvent(
+  bridge: EvenAppBridge,
+  eventType: OsEventTypeList,
+  itemIndex?: number,
+): Promise<void> {
+  log(`handleListEvent: type=${eventType} index=${itemIndex}`)
+  if (eventType === OsEventTypeList.CLICK_EVENT) {
+    switch (itemIndex) {
+      case ACTION_SEEK:
+        uiMode = 'seek'
+        await rebuildDisplay(bridge)
+        break
+      case ACTION_PLAY: {
+        const wantPlaying = !isPlaying
+        await sendCommand(wantPlaying ? 'play' : 'pause')
+        isPlaying = wantPlaying
+        await rebuildDisplay(bridge)
+        break
+      }
+      case ACTION_NEXT:
+        await sendCommand('next')
+        await rebuildDisplay(bridge)
+        break
+      case ACTION_PREV:
+        await sendCommand('prev')
+        await rebuildDisplay(bridge)
+        break
+      case ACTION_VOL:
+        uiMode = 'volume'
+        await rebuildDisplay(bridge)
+        break
+      default:
+        log(`Unknown item index: ${itemIndex}`, 'warn')
+        break
+    }
+  }
+}
+
+async function handleSliderEvent(
   bridge: EvenAppBridge,
   eventType: OsEventTypeList,
 ): Promise<void> {
   const now = Date.now()
-  log(`handleEvent: type=${eventType}`)
+  log(`handleSliderEvent: type=${eventType} mode=${uiMode}`)
 
   if (eventType === OsEventTypeList.DOUBLE_CLICK_EVENT) {
-    await sendCommand('next')
-  } else if (eventType === OsEventTypeList.CLICK_EVENT) {
-    await sendCommand(isPlaying ? 'pause' : 'play')
-  } else if (eventType === OsEventTypeList.SCROLL_TOP_EVENT && now - lastScrollTime > SCROLL_COOLDOWN_MS) {
-    lastScrollTime = now
-    const step = volumeStep()
-    const newVol = Math.min(maxVolume, volume + step)
-    await sendVolSet(newVol)
-  } else if (eventType === OsEventTypeList.SCROLL_BOTTOM_EVENT && now - lastScrollTime > SCROLL_COOLDOWN_MS) {
-    lastScrollTime = now
-    const step = volumeStep()
-    const newVol = Math.max(0, volume - step)
-    await sendVolSet(newVol)
-  } else {
+    uiMode = 'list'
+    await sendCommand('status')
+    await rebuildDisplay(bridge)
     return
   }
 
-  await updateDisplay(bridge)
+  if (eventType === OsEventTypeList.SCROLL_TOP_EVENT || eventType === OsEventTypeList.SCROLL_BOTTOM_EVENT) {
+    if (now - lastScrollTime < SCROLL_COOLDOWN_MS) return
+    lastScrollTime = now
+
+    const increment = eventType === OsEventTypeList.SCROLL_TOP_EVENT ? 1 : -1
+
+    if (uiMode === 'volume') {
+      const step = volumeStep()
+      const newVol = Math.max(0, Math.min(maxVolume, volume + increment * step))
+      await sendVolSet(newVol)
+    } else if (uiMode === 'seek') {
+      const step = Math.max(5000, duration / 20)
+      const newPos = Math.max(0, Math.min(duration, position + increment * step))
+      await sendSeek(newPos)
+    }
+
+    await updateSliderText(bridge)
+  }
 }
 
 // ── Main ──
@@ -236,6 +540,7 @@ async function main() {
 
   const bridge = await waitForEvenAppBridge()
   log('Bridge ready')
+  setGlassesStatus('Glasses connected', 'green')
 
   // Initial status fetch
   const statusResult = await sendCommand('status')
@@ -245,61 +550,47 @@ async function main() {
     log('Initial status fetch failed - bridge may be offline', 'warn')
   }
 
-  // Create startup page — single full-screen text container
-  // This is the PROVEN WORKING structure from before the UI rework
-  const textContainer = new TextContainerProperty({
-    containerID: 1,
-    containerName: 'media-info',
-    xPosition: 0,
-    yPosition: 0,
-    width: 576,
-    height: 288,
-    content: buildDisplayText(),
-    isEventCapture: 1,
-    borderWidth: 0,
-  })
-
-  const startupPayload = new CreateStartUpPageContainer({
-    containerTotalNum: 1,
-    textObject: [textContainer],
-  })
+  // Create startup page (text + list only, no image — image causes "invalid")
+  const createResult = await bridge.createStartUpPageContainer(buildStartupPage())
 
   const resultNames = ['success', 'invalid', 'oversize', 'outOfMemory']
-  let createResult: number
-  try {
-    createResult = await bridge.createStartUpPageContainer(startupPayload)
-  } catch (e) {
-    log(`[DBG] createStartUpPageContainer threw: ${e}`, 'error')
-    createResult = -1
-  }
-  log(`createStartUpPageContainer: ${resultNames[createResult] ?? createResult} (raw=${createResult})`)
+  log(`createStartUpPageContainer: ${resultNames[createResult] ?? createResult}`)
 
   if (createResult !== StartUpPageCreateResult.success) {
-    log(`STARTUP FAILED: ${resultNames[createResult] ?? createResult}`, 'error')
-    setGlassesStatus(`Startup failed: ${resultNames[createResult] ?? createResult}`, 'red')
+    log(`STARTUP PAGE FAILED: ${resultNames[createResult] ?? createResult}`, 'error')
+    setGlassesStatus(`Page create failed: ${resultNames[createResult]}`, 'red')
     return
   }
 
   setGlassesStatus('Glasses connected', 'green')
-  log('Startup page created OK')
 
-  // Update display with current state
-  await updateDisplay(bridge)
+  // Immediately rebuild with image container to get album art
+  await rebuildDisplay(bridge)
 
   // Event handler
   bridge.onEvenHubEvent(async (event: EvenHubEvent) => {
     try {
+      const le = event.listEvent
       const te = event.textEvent
       const se = event.sysEvent
 
-      log(`Event: text=${!!te} sys=${!!se} raw=${JSON.stringify(event.jsonData ?? {}).slice(0, 200)}`)
+      log(`Event: list=${!!le} text=${!!te} sys=${!!se} raw=${JSON.stringify(event.jsonData ?? {}).slice(0, 200)}`)
 
-      const eventType = te?.eventType ?? se?.eventType
-      if (eventType === undefined) {
-        log('No eventType found, ignoring', 'warn')
-        return
+      if (uiMode === 'list') {
+        const eventType = le?.eventType ?? se?.eventType
+        if (eventType === undefined) {
+          log('List mode: no eventType found, ignoring', 'warn')
+          return
+        }
+        await handleListEvent(bridge, eventType, le?.currentSelectItemIndex)
+      } else {
+        const eventType = te?.eventType ?? se?.eventType
+        if (eventType === undefined) {
+          log('Slider mode: no eventType found, ignoring', 'warn')
+          return
+        }
+        await handleSliderEvent(bridge, eventType)
       }
-      await handleEvent(bridge, eventType)
     } catch (e) {
       log(`Event handler error: ${e}`, 'error')
     }
@@ -309,10 +600,10 @@ async function main() {
   setInterval(async () => {
     const oldTitle = title
     const oldArtist = artist
-    const oldVol = volume
     await sendCommand('status')
-    if (title !== oldTitle || artist !== oldArtist || volume !== oldVol) {
-      await updateDisplay(bridge)
+    if (title !== oldTitle || artist !== oldArtist) {
+      await updateNowPlayingText(bridge)
+      fetchAndSendAlbumArt(bridge)
     }
   }, 5000)
 }
