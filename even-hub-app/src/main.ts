@@ -500,94 +500,6 @@ async function handleSliderEvent(
   }
 }
 
-// ── Diagnostic: test which rebuild configurations the firmware accepts ──
-async function runDiagnostics(bridge: EvenAppBridge): Promise<string | null> {
-  const tests: { name: string; build: () => RebuildPageContainer }[] = [
-    {
-      name: 'A: 1 list only',
-      build: () => new RebuildPageContainer({
-        containerTotalNum: 1,
-        listObject: [new ListContainerProperty({
-          containerID: 1,
-          containerName: 'list-1',
-          xPosition: 0, yPosition: 0, width: 576, height: 288,
-          borderWidth: 1, borderColor: 5, borderRdaius: 5, paddingLength: 10,
-          isEventCapture: 1,
-          itemContainer: new ListItemContainerProperty({
-            itemCount: 3, itemWidth: 0, isItemSelectBorderEn: 1,
-            itemName: ['Item 1', 'Item 2', 'Item 3'],
-          }),
-        })],
-      }),
-    },
-    {
-      name: 'B: SDK example (list+text, 2 containers)',
-      build: () => new RebuildPageContainer({
-        containerTotalNum: 2,
-        listObject: [new ListContainerProperty({
-          containerID: 1,
-          containerName: 'list-1',
-          xPosition: 100, yPosition: 50, width: 200, height: 150,
-          borderWidth: 2, borderColor: 5, borderRdaius: 5, paddingLength: 10,
-          isEventCapture: 1,
-          itemContainer: new ListItemContainerProperty({
-            itemCount: 3, itemWidth: 0, isItemSelectBorderEn: 1,
-            itemName: ['Item 1', 'Item 2', 'Item 3'],
-          }),
-        })],
-        textObject: [new TextContainerProperty({
-          containerID: 2,
-          containerName: 'text-1',
-          xPosition: 100, yPosition: 220, width: 200, height: 50,
-          borderWidth: 1, borderColor: 0, borderRdaius: 3, paddingLength: 5,
-          content: 'Hello World',
-          isEventCapture: 0,
-        })],
-      }),
-    },
-    {
-      name: 'C: 2 text containers',
-      build: () => new RebuildPageContainer({
-        containerTotalNum: 2,
-        textObject: [
-          new TextContainerProperty({
-            containerID: 1, containerName: 'text-1',
-            xPosition: 0, yPosition: 0, width: 576, height: 140,
-            content: 'Top half', isEventCapture: 0, borderWidth: 0,
-          }),
-          new TextContainerProperty({
-            containerID: 2, containerName: 'text-2',
-            xPosition: 0, yPosition: 148, width: 576, height: 140,
-            content: 'Bottom half', isEventCapture: 1, borderWidth: 0,
-          }),
-        ],
-      }),
-    },
-    {
-      name: 'D: our list page (text+list, 2 containers)',
-      build: () => buildListPage(),
-    },
-  ]
-
-  const results: string[] = []
-  let firstPass: string | null = null
-
-  for (const test of tests) {
-    try {
-      const ok = await bridge.rebuildPageContainer(test.build())
-      const status = ok ? 'PASS' : 'FAIL'
-      results.push(`${test.name}: ${status}`)
-      log(`[DIAG] ${test.name}: ${status}`)
-      if (ok && !firstPass) firstPass = test.name
-    } catch (e) {
-      results.push(`${test.name}: THREW ${e}`)
-      log(`[DIAG] ${test.name}: THREW ${e}`, 'error')
-    }
-  }
-
-  log(`[DIAG] Summary: ${results.join(' | ')}`)
-  return firstPass
-}
 
 // ── Main ──
 async function main() {
@@ -605,64 +517,73 @@ async function main() {
     log('Initial status fetch failed - bridge may be offline', 'warn')
   }
 
-  // Step 1: Create startup page with PROVEN WORKING single text container
+  // Step 1: Create startup page — shut down stale page first if needed
+  const startupPage = new CreateStartUpPageContainer({
+    containerTotalNum: 1,
+    textObject: [new TextContainerProperty({
+      containerID: 1,
+      containerName: 'media-info',
+      xPosition: 0, yPosition: 0, width: 576, height: 288,
+      content: buildDisplayText(),
+      isEventCapture: 1,
+      borderWidth: 0,
+    })],
+  })
+
   const resultNames = ['success', 'invalid', 'oversize', 'outOfMemory']
   let createResult: number
   try {
-    createResult = await bridge.createStartUpPageContainer(
-      new CreateStartUpPageContainer({
-        containerTotalNum: 1,
-        textObject: [new TextContainerProperty({
-          containerID: 1,
-          containerName: 'media-info',
-          xPosition: 0, yPosition: 0, width: 576, height: 288,
-          content: buildDisplayText(),
-          isEventCapture: 1,
-          borderWidth: 0,
-        })],
-      })
-    )
+    createResult = await bridge.createStartUpPageContainer(startupPage)
   } catch (e) {
     log(`createStartUpPageContainer threw: ${e}`, 'error')
     createResult = -1
   }
   log(`createStartUpPageContainer: ${resultNames[createResult] ?? createResult} (raw=${createResult})`)
 
+  // "invalid" (raw=1) means a page exists from a previous session — rebuilds fail on stale pages
+  // Fix: shut down the old page and create fresh
+  if (createResult === StartUpPageCreateResult.invalid) {
+    log('Stale page detected — shutting down and recreating...')
+    try {
+      await bridge.shutDownPageContainer(0)
+      log('shutDownPageContainer OK')
+    } catch (e) {
+      log(`shutDownPageContainer threw: ${e}`, 'error')
+    }
+    // Small delay to let firmware clean up
+    await new Promise(r => setTimeout(r, 500))
+    try {
+      createResult = await bridge.createStartUpPageContainer(startupPage)
+      log(`Re-create result: ${resultNames[createResult] ?? createResult} (raw=${createResult})`)
+    } catch (e) {
+      log(`Re-create threw: ${e}`, 'error')
+      createResult = -1
+    }
+  }
+
   if (createResult === StartUpPageCreateResult.success) {
-    log('Startup page created (first time)')
+    log('Startup page created successfully')
   } else {
-    // "invalid" means it was already created in a previous session — that's fine
-    log(`Startup returned ${resultNames[createResult] ?? createResult} — page already exists, proceeding with rebuild`)
+    log(`Startup page creation returned: ${resultNames[createResult] ?? createResult}`, 'warn')
   }
 
   setGlassesStatus('Glasses connected', 'green')
-  log('Running rebuild diagnostics...')
 
-  // Step 2: Run diagnostics to find which rebuild configs work
-  const firstPass = await runDiagnostics(bridge)
-
-  if (!firstPass) {
-    log('ALL rebuild tests FAILED — staying on text UI', 'error')
+  // Step 2: Try to rebuild with our list UI
+  uiMode = 'list'
+  try {
+    const ok = await bridge.rebuildPageContainer(buildListPage())
+    if (ok) {
+      log('List UI active')
+    } else {
+      log('List rebuild failed — falling back to text UI', 'warn')
+      uiMode = 'text'
+      setGlassesStatus('Glasses connected (text only)', 'yellow')
+    }
+  } catch (e) {
+    log(`List rebuild threw: ${e} — falling back to text UI`, 'error')
+    uiMode = 'text'
     setGlassesStatus('Glasses connected (text only)', 'yellow')
-  }
-
-  // Step 3: Rebuild with our list page if test D passed, otherwise stay on text
-  if (firstPass === 'D: our list page (text+list, 2 containers)') {
-    uiMode = 'list'
-    await bridge.rebuildPageContainer(buildListPage())
-    log('List UI active')
-  } else if (firstPass) {
-    // Some other test passed but not our list page — rebuild back to text
-    log(`Only "${firstPass}" passed, our list page failed. Rebuilding to text...`, 'warn')
-    await bridge.rebuildPageContainer(new RebuildPageContainer({
-      containerTotalNum: 1,
-      textObject: [new TextContainerProperty({
-        containerID: 1, containerName: 'media-info',
-        xPosition: 0, yPosition: 0, width: 576, height: 288,
-        content: buildDisplayText(),
-        isEventCapture: 1, borderWidth: 0,
-      })],
-    }))
   }
 
   // Event handler — route based on active UI mode
