@@ -1,18 +1,17 @@
 import {
   waitForEvenAppBridge,
   CreateStartUpPageContainer,
-  RebuildPageContainer,
   TextContainerUpgrade,
-  TextContainer,
-  ListContainer,
+  TextContainerProperty,
+  OsEventTypeList,
   type EvenHubEvent,
+  type EvenAppBridge,
 } from '@evenrealities/even_hub_sdk'
 
 const BRIDGE_PORT = 8765
 const BRIDGE_URL = `http://localhost:${BRIDGE_PORT}`
 const SCROLL_COOLDOWN_MS = 300
 
-// Media commands sent to the Android companion app
 type MediaCommand = 'play' | 'pause' | 'next' | 'prev' | 'vol-up' | 'vol-down' | 'status'
 
 // State
@@ -21,7 +20,6 @@ let lastScrollTime = 0
 let currentTrack = 'No media'
 let volume = -1
 
-// ── Send command to Android Media Bridge ──
 async function sendCommand(cmd: MediaCommand): Promise<void> {
   try {
     const res = await fetch(`${BRIDGE_URL}/${cmd}`, { method: 'POST' })
@@ -36,36 +34,41 @@ async function sendCommand(cmd: MediaCommand): Promise<void> {
   }
 }
 
-// ── Build display text for glasses ──
 function buildDisplayText(): string {
   const state = isPlaying ? '▶' : '⏸'
   const vol = volume >= 0 ? `Vol: ${volume}` : ''
-  const lines = [
+  return [
     `${state} ${currentTrack}`,
     '',
     'Tap: Play/Pause',
     'Double tap: Next',
     `Scroll: Volume ${vol}`,
-  ]
-  return lines.join('\n')
+  ].join('\n')
 }
 
-// ── Main ──
+async function updateDisplay(bridge: EvenAppBridge) {
+  await bridge.textContainerUpgrade(
+    new TextContainerUpgrade({
+      containerID: 1,
+      containerName: 'media-info',
+      contentOffset: 0,
+      contentLength: 500,
+      content: buildDisplayText(),
+    })
+  )
+}
+
 async function main() {
   const bridge = await waitForEvenAppBridge()
 
-  // Create initial UI: single text container filling the screen
-  const textContainer = new TextContainer({
+  const textContainer = new TextContainerProperty({
     containerID: 1,
     containerName: 'media-info',
-    containerX: 0,
-    containerY: 0,
-    containerW: 576,
-    containerH: 288,
-    contentOffset: 0,
-    contentLength: 500,
+    xPosition: 0,
+    yPosition: 0,
+    width: 576,
+    height: 288,
     content: buildDisplayText(),
-    fontSize: 24,
     isEventCapture: 1,
     borderWidth: 0,
   })
@@ -77,61 +80,34 @@ async function main() {
     })
   )
 
-  // Fetch initial status from bridge
   await sendCommand('status')
   await updateDisplay(bridge)
 
-  // Listen for glasses input events
   bridge.onEvenHubEvent(async (event: EvenHubEvent) => {
-    // Handle text container events (from real hardware)
     const te = event.textEvent
     const se = event.sysEvent
 
-    // Detect click: single tap = play/pause
-    const isClick =
-      (te && (te.eventType === 0 || te.eventType === undefined)) ||
-      (se && (se.eventType === 0 || se.eventType === undefined))
-
-    // Detect double click: double tap = next track
-    const isDoubleClick =
-      (te && te.eventType === 3) || (se && se.eventType === 3)
-
-    // Detect scroll
-    const isScrollUp =
-      (te && te.eventType === 1) || (se && se.eventType === 1)
-    const isScrollDown =
-      (te && te.eventType === 2) || (se && se.eventType === 2)
+    const eventType = te?.eventType ?? se?.eventType
+    if (eventType === undefined) return
 
     const now = Date.now()
 
-    if (isDoubleClick) {
+    if (eventType === OsEventTypeList.DOUBLE_CLICK_EVENT) {
       await sendCommand('next')
-    } else if (isClick) {
+    } else if (eventType === OsEventTypeList.CLICK_EVENT) {
       await sendCommand(isPlaying ? 'pause' : 'play')
-    } else if (isScrollUp && now - lastScrollTime > SCROLL_COOLDOWN_MS) {
+    } else if (eventType === OsEventTypeList.SCROLL_TOP_EVENT && now - lastScrollTime > SCROLL_COOLDOWN_MS) {
       lastScrollTime = now
       await sendCommand('vol-up')
-    } else if (isScrollDown && now - lastScrollTime > SCROLL_COOLDOWN_MS) {
+    } else if (eventType === OsEventTypeList.SCROLL_BOTTOM_EVENT && now - lastScrollTime > SCROLL_COOLDOWN_MS) {
       lastScrollTime = now
       await sendCommand('vol-down')
     } else {
-      return // No recognized action
+      return
     }
 
     await updateDisplay(bridge)
   })
-}
-
-async function updateDisplay(bridge: any) {
-  await bridge.textContainerUpgrade(
-    new TextContainerUpgrade({
-      containerID: 1,
-      containerName: 'media-info',
-      contentOffset: 0,
-      contentLength: 500,
-      content: buildDisplayText(),
-    })
-  )
 }
 
 main()
