@@ -143,22 +143,27 @@ async function updateGlassesText(bridge: EvenAppBridge): Promise<void> {
 }
 
 // ── Event handling (text mode only) ──
+// Firmware event types observed from hardware (different from SDK enum!):
+//   0 = unknown/empty, 1 = single tap, 2 = scroll, 3 = double tap
+const HW_TAP = 1
+const HW_SCROLL = 2
+const HW_DOUBLE_TAP = 3
+
 async function handleEvent(
   bridge: EvenAppBridge,
-  eventType: OsEventTypeList,
+  eventType: number,
 ): Promise<void> {
   const now = Date.now()
 
-  if (eventType === OsEventTypeList.DOUBLE_CLICK_EVENT) {
+  if (eventType === HW_DOUBLE_TAP) {
     await sendCommand('next')
-  } else if (eventType === OsEventTypeList.CLICK_EVENT) {
+  } else if (eventType === HW_TAP) {
     await sendCommand(isPlaying ? 'pause' : 'play')
-  } else if (eventType === OsEventTypeList.SCROLL_TOP_EVENT && now - lastScrollTime > SCROLL_COOLDOWN_MS) {
+  } else if (eventType === HW_SCROLL && now - lastScrollTime > SCROLL_COOLDOWN_MS) {
     lastScrollTime = now
+    // Scroll events don't indicate direction — toggle volume up
+    // TODO: figure out scroll direction once basic controls work
     await sendVolSet(Math.min(maxVolume, volume + volumeStep()))
-  } else if (eventType === OsEventTypeList.SCROLL_BOTTOM_EVENT && now - lastScrollTime > SCROLL_COOLDOWN_MS) {
-    lastScrollTime = now
-    await sendVolSet(Math.max(0, volume - volumeStep()))
   } else {
     return
   }
