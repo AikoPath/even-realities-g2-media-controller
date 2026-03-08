@@ -206,11 +206,11 @@ async function main() {
       await sendCommand(cmd)
     } else if (eventType === OsEventTypeList.SCROLL_TOP_EVENT && now - lastScrollTime > SCROLL_COOLDOWN_MS) {
       lastScrollTime = now
-      selectedIndex = (selectedIndex - 1 + ACTIONS.length) % ACTIONS.length
+      selectedIndex = (selectedIndex + 1) % ACTIONS.length
       addLog('NAV', `Selected: ${ACTIONS[selectedIndex].label}`)
     } else if (eventType === OsEventTypeList.SCROLL_BOTTOM_EVENT && now - lastScrollTime > SCROLL_COOLDOWN_MS) {
       lastScrollTime = now
-      selectedIndex = (selectedIndex + 1) % ACTIONS.length
+      selectedIndex = (selectedIndex - 1 + ACTIONS.length) % ACTIONS.length
       addLog('NAV', `Selected: ${ACTIONS[selectedIndex].label}`)
     } else if (eventType === OsEventTypeList.DOUBLE_CLICK_EVENT) {
       // Double tap also executes selected action (alternative trigger)
