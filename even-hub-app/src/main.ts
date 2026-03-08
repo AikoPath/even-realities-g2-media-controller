@@ -121,6 +121,7 @@ async function main() {
   // Watch glasses connection status
   bridge.onDeviceStatusChanged((status: DeviceStatus) => {
     const ct = status.connectType
+    if (ct === 'none') return
     addLog('DEVICE', `status=${ct}, battery=${status.batteryLevel ?? '?'}%, wearing=${status.isWearing ?? '?'}`)
     if (ct === 'connected') {
       setStatus('glasses', 'dot-green', `Glasses: connected${status.batteryLevel !== undefined ? ` (${status.batteryLevel}%)` : ''}`)
@@ -165,10 +166,12 @@ async function main() {
 
     const eventType = te?.eventType ?? se?.eventType
 
-    // Firmware sends single tap as empty evenHubEvent (no eventType)
+    // Firmware sends single tap as empty evenHubEvent (no eventType).
+    // Skip audio events which also have no textEvent/sysEvent.
     if (eventType === undefined) {
+      if (event.audioEvent) return
       const action = isPlaying ? 'pause' : 'play'
-      addLog('ACTION', `${action} (single tap)`)
+      addLog('ACTION', `${action}`)
       await sendCommand(action)
       await updateDisplay(bridge)
       return
