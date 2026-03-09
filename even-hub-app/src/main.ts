@@ -53,31 +53,22 @@ function addLog(action: string, detail: string = '') {
 function updateMediaStatus() {
   if (currentTrack === 'Bridge offline') {
     setStatus('media', 'dot-gray', 'Media: unknown')
-  } else if (isPlaying) {
-    setStatus('media', 'dot-green', `Media: playing - ${currentTrack}`)
   } else {
-    setStatus('media', 'dot-yellow', `Media: paused - ${currentTrack}`)
+    setStatus('media', 'dot-green', `Media: ${currentTrack}`)
   }
 }
 
 // --- Bridge communication ---
 
-let isPlaying = false
 let currentTrack = 'No media'
 let volume = -1
+let lastPlayCmd: 'play' | 'pause' = 'play'
 
 async function sendCommand(cmd: MediaCommand): Promise<void> {
   try {
     const res = await fetch(`${BRIDGE_URL}/${cmd}`, { method: 'POST' })
     if (res.ok) {
       const data = await res.json()
-      // For play/pause commands the Android bridge reads playbackState
-      // immediately after dispatching — before the state has actually
-      // changed. So the response returns stale data. We skip updating
-      // isPlaying here; the caller sets it optimistically instead.
-      if (cmd !== 'play' && cmd !== 'pause' && data.playing !== undefined) {
-        isPlaying = data.playing
-      }
       if (data.title) {
         currentTrack = data.artist ? `${data.artist} - ${data.title}` : data.title
       } else if (data.track) {
@@ -127,7 +118,7 @@ function parseEvent(event: EvenHubEvent): Action | null {
 // --- State machine ---
 
 const MENU_ITEMS: { label: string; command: () => MediaCommand }[] = [
-  { label: 'Play / Pause', command: () => isPlaying ? 'pause' : 'play' },
+  { label: 'Play / Pause', command: () => lastPlayCmd === 'play' ? 'pause' : 'play' },
   { label: 'Next Track',   command: () => 'next' },
   { label: 'Prev Track',   command: () => 'prev' },
 ]
@@ -158,11 +149,7 @@ async function handleAction(action: Action): Promise<void> {
       } else {
         const item = MENU_ITEMS[mode.selected]
         const cmd = item.command()
-        // Optimistically set isPlaying so the indicator updates on the
-        // first tap. The bridge returns stale state for play/pause because
-        // it reads playbackState before Android has processed the dispatch.
-        if (cmd === 'play') isPlaying = true
-        else if (cmd === 'pause') isPlaying = false
+        if (cmd === 'play' || cmd === 'pause') lastPlayCmd = cmd
         addLog('ACTION', `${item.label} (${cmd})`)
         await sendCommand(cmd)
       }
@@ -193,8 +180,7 @@ function buildVolumeBar(): string {
 }
 
 function buildMainText(): string {
-  const state = isPlaying ? '\u25B6' : '\u25A0'
-  const header = `${state} ${currentTrack}`
+  const header = currentTrack
   const selected = mode.type === 'menu' ? mode.selected : -1
 
   const menu = MENU_ITEMS.map((item, i) =>
