@@ -66,8 +66,6 @@ Events arrive via `bridge.onEvenHubEvent(callback)` as `EvenHubEvent`:
 - **Simulator vs hardware**: Simulator sends `sysEvent` for clicks; hardware sends `textEvent`/`listEvent`.
 - **Scroll throttling**: Scroll events fire rapidly. Use 300ms cooldown.
 - **`borderRdaius`**: SDK has a typo — use `borderRdaius` not `borderRadius`.
-- **Stale bridge response for play/pause**: The Android bridge dispatches `transportControls.play()`/`.pause()` then immediately reads `playbackState`. Since the dispatch is async, the response returns the OLD state.
-
 ### UI Patterns
 
 - **`>` prefix cursor**: Simulate menu selection with `> Item` / `  Item`. Update via `textContainerUpgrade`.
