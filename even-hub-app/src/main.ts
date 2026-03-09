@@ -96,7 +96,7 @@ async function sendCommand(cmd: MediaCommand): Promise<void> {
 
 // --- Input parsing ---
 
-type Action = 'tap' | 'scroll-up' | 'scroll-down'
+type Action = 'tap' | 'double-tap' | 'scroll-up' | 'scroll-down'
 
 let lastScrollTime = 0
 
@@ -107,6 +107,7 @@ function parseEvent(event: EvenHubEvent): Action | null {
 
   // CLICK_EVENT = 0, SDK fromJson normalizes 0 to undefined
   if (eventType === undefined || eventType === OsEventTypeList.CLICK_EVENT) return 'tap'
+  if (eventType === OsEventTypeList.DOUBLE_CLICK_EVENT) return 'double-tap'
 
   const now = Date.now()
   if (eventType === OsEventTypeList.SCROLL_TOP_EVENT) {
@@ -157,8 +158,9 @@ async function handleAction(action: Action): Promise<void> {
       } else {
         const item = MENU_ITEMS[mode.selected]
         const cmd = item.command()
-        // Optimistically set isPlaying for play/pause before sendCommand,
-        // because the bridge returns stale state for these commands.
+        // Optimistically set isPlaying so the indicator updates on the
+        // first tap. The bridge returns stale state for play/pause because
+        // it reads playbackState before Android has processed the dispatch.
         if (cmd === 'play') isPlaying = true
         else if (cmd === 'pause') isPlaying = false
         addLog('ACTION', `${item.label} (${cmd})`)

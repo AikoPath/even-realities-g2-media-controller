@@ -80,7 +80,6 @@ Events arrive via `bridge.onEvenHubEvent(callback)` as `EvenHubEvent`:
 
 - Use a discriminated union for mode: `{ type: 'menu', selected: number } | { type: 'volume' }`.
 - Tap selects/activates, tap again deselects (toggle pattern).
-- Double-tap = global shortcut (play/pause) regardless of current mode.
 - Scroll = navigate menu items or adjust volume depending on mode.
 - Track border state separately; only `rebuildPageContainer` when it changes, use `textContainerUpgrade` otherwise.
 - Keep navigation shallow (1-2 levels max) — deep trees fail with limited inputs.
