@@ -65,23 +65,17 @@ Events arrive via `bridge.onEvenHubEvent(callback)` as `EvenHubEvent`:
 - **Missing `currentSelectItemIndex`**: Simulator/hardware omits index for item 0. Track selection in app state.
 - **Simulator vs hardware**: Simulator sends `sysEvent` for clicks; hardware sends `textEvent`/`listEvent`.
 - **Scroll throttling**: Scroll events fire rapidly. Use 300ms cooldown.
-- **Tap/double-tap debounce**: Firmware may send CLICK_EVENT before DOUBLE_CLICK_EVENT for a double-tap gesture. Delay tap handling ~250ms and cancel if double-tap arrives. Without this, tap fires first (toggling state), then double-tap toggles again → no net change.
 - **`borderRdaius`**: SDK has a typo — use `borderRdaius` not `borderRadius`.
-- **Stale bridge response for play/pause**: The Android bridge dispatches `transportControls.play()`/`.pause()` then immediately reads `playbackState`. Since the dispatch is async, the response returns the OLD state. Always set `isPlaying` optimistically based on the command sent, not the bridge response.
-
 ### UI Patterns
 
-- **Hidden event capture container**: Use a full-screen text container with `isEventCapture: 1` and content `' '` behind visible containers. This captures events without firmware consuming scroll gestures for internal text scrolling.
 - **`>` prefix cursor**: Simulate menu selection with `> Item` / `  Item`. Update via `textContainerUpgrade`.
 - **Border highlight**: Toggle `borderWidth` on containers to indicate selection. Requires `rebuildPageContainer`.
-- **Play indicator**: Use `▶` (U+25B6) for playing, `■` (U+25A0) for paused — avoids ambiguity with `>` cursor.
 - **Unicode**: `━─` for progress bars, `●○■□` for indicators, `▲▶▼◀` for arrows, box-drawing `┌┐└┘│─` available. Font is NOT monospaced.
 
 ### State Machine Design
 
 - Use a discriminated union for mode: `{ type: 'menu', selected: number } | { type: 'volume' }`.
 - Tap selects/activates, tap again deselects (toggle pattern).
-- Double-tap = global shortcut (play/pause) regardless of current mode.
 - Scroll = navigate menu items or adjust volume depending on mode.
 - Track border state separately; only `rebuildPageContainer` when it changes, use `textContainerUpgrade` otherwise.
 - Keep navigation shallow (1-2 levels max) — deep trees fail with limited inputs.

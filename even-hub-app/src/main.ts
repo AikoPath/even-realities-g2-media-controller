@@ -14,18 +14,16 @@ const BRIDGE_PORT = 8765
 const BRIDGE_URL = `http://localhost:${BRIDGE_PORT}`
 const SCROLL_COOLDOWN_MS = 300
 
-// Display layout
+// Display layout — 2 containers: main (top) + volume bar (bottom)
 const DISPLAY_W = 576
 const DISPLAY_H = 288
 const VOL_H = 72
 const MAIN_H = DISPLAY_H - VOL_H
 
-// Container IDs
-const CAPTURE = { id: 0, name: 'evt' }
 const MAIN = { id: 1, name: 'main' }
 const VOL = { id: 2, name: 'vol' }
 
-type MediaCommand = 'play' | 'pause' | 'next' | 'prev' | 'vol-up' | 'vol-down' | 'status'
+type MediaCommand = 'play-pause' | 'next' | 'prev' | 'vol-up' | 'vol-down' | 'status'
 
 declare const __APP_VERSION__: string
 
@@ -55,16 +53,13 @@ function addLog(action: string, detail: string = '') {
 function updateMediaStatus() {
   if (currentTrack === 'Bridge offline') {
     setStatus('media', 'dot-gray', 'Media: unknown')
-  } else if (isPlaying) {
-    setStatus('media', 'dot-green', `Media: playing - ${currentTrack}`)
   } else {
-    setStatus('media', 'dot-yellow', `Media: paused - ${currentTrack}`)
+    setStatus('media', 'dot-green', `Media: ${currentTrack}`)
   }
 }
 
 // --- Bridge communication ---
 
-let isPlaying = false
 let currentTrack = 'No media'
 let volume = -1
 
@@ -73,11 +68,8 @@ async function sendCommand(cmd: MediaCommand): Promise<void> {
     const res = await fetch(`${BRIDGE_URL}/${cmd}`, { method: 'POST' })
     if (res.ok) {
       const data = await res.json()
-      if (data.playing !== undefined) isPlaying = data.playing
       if (data.title) {
         currentTrack = data.artist ? `${data.artist} - ${data.title}` : data.title
-      } else if (data.track) {
-        currentTrack = data.track
       }
       if (data.volume !== undefined) volume = data.volume
       setStatus('bridge', 'dot-green', 'Bridge: connected')
@@ -92,7 +84,7 @@ async function sendCommand(cmd: MediaCommand): Promise<void> {
 
 // --- Input parsing ---
 
-type Action = 'tap' | 'double-tap' | 'scroll-up' | 'scroll-down'
+type Action = 'tap' | 'scroll-up' | 'scroll-down'
 
 let lastScrollTime = 0
 
@@ -103,7 +95,6 @@ function parseEvent(event: EvenHubEvent): Action | null {
 
   // CLICK_EVENT = 0, SDK fromJson normalizes 0 to undefined
   if (eventType === undefined || eventType === OsEventTypeList.CLICK_EVENT) return 'tap'
-  if (eventType === OsEventTypeList.DOUBLE_CLICK_EVENT) return 'double-tap'
 
   const now = Date.now()
   if (eventType === OsEventTypeList.SCROLL_TOP_EVENT) {
@@ -122,10 +113,10 @@ function parseEvent(event: EvenHubEvent): Action | null {
 
 // --- State machine ---
 
-const MENU_ITEMS: { label: string; command: () => MediaCommand }[] = [
-  { label: 'Play / Pause', command: () => isPlaying ? 'pause' : 'play' },
-  { label: 'Next Track',   command: () => 'next' },
-  { label: 'Prev Track',   command: () => 'prev' },
+const MENU_ITEMS: { label: string; command: MediaCommand }[] = [
+  { label: 'Play / Pause', command: 'play-pause' },
+  { label: 'Next Track', command: 'next' },
+  { label: 'Prev Track', command: 'prev' },
 ]
 const VOLUME_ITEM_INDEX = MENU_ITEMS.length
 const TOTAL_ITEMS = MENU_ITEMS.length + 1 // +1 for volume bar
@@ -135,27 +126,6 @@ type Mode =
   | { type: 'volume' }
 
 let mode: Mode = { type: 'menu', selected: 0 }
-
-// Optimistically toggle play state. The bridge reads playbackState immediately
-// after dispatching play()/pause(), before Android has actually changed state,
-// so the response returns stale data. We set isPlaying based on our intent.
-async function togglePlayPause(): Promise<void> {
-  const wantPlay = !isPlaying
-  const cmd = wantPlay ? 'play' : 'pause'
-  addLog('ACTION', `Play/Pause (${cmd})`)
-  isPlaying = wantPlay
-  updateMediaStatus()
-  await sendCommand(cmd)
-}
-
-// For menu items that might be play/pause or might be next/prev
-async function togglePlayPauseOrSend(cmd: MediaCommand): Promise<void> {
-  if (cmd === 'play' || cmd === 'pause') {
-    isPlaying = cmd === 'play'
-    updateMediaStatus()
-  }
-  await sendCommand(cmd)
-}
 
 async function handleAction(action: Action): Promise<void> {
   if (mode.type === 'menu') {
@@ -169,19 +139,14 @@ async function handleAction(action: Action): Promise<void> {
       addLog('NAV', `Selected: ${name}`)
     } else if (action === 'tap') {
       if (mode.selected === VOLUME_ITEM_INDEX) {
-        // Tap to enter volume mode
         mode = { type: 'volume' }
         addLog('VOL', 'Entered volume mode')
         await sendCommand('status')
       } else {
         const item = MENU_ITEMS[mode.selected]
-        const cmd = item.command()
-        addLog('ACTION', `${item.label} (${cmd})`)
-        await togglePlayPauseOrSend(cmd)
+        addLog('ACTION', `${item.label} (${item.command})`)
+        await sendCommand(item.command)
       }
-    } else if (action === 'double-tap') {
-      // Global play/pause shortcut
-      await togglePlayPause()
     }
   } else if (mode.type === 'volume') {
     if (action === 'scroll-up') {
@@ -191,12 +156,8 @@ async function handleAction(action: Action): Promise<void> {
       addLog('VOL', 'Volume up')
       await sendCommand('vol-up')
     } else if (action === 'tap') {
-      // Tap to exit volume mode
       mode = { type: 'menu', selected: VOLUME_ITEM_INDEX }
       addLog('VOL', 'Exited volume mode')
-    } else if (action === 'double-tap') {
-      // Global play/pause shortcut
-      await togglePlayPause()
     }
   }
 }
@@ -213,9 +174,7 @@ function buildVolumeBar(): string {
 }
 
 function buildMainText(): string {
-  // Use ▶ for playing, ■ for paused — avoids ambiguity with > cursor
-  const state = isPlaying ? '\u25B6' : '\u25A0'
-  const header = `${state} ${currentTrack}`
+  const header = currentTrack
   const selected = mode.type === 'menu' ? mode.selected : -1
 
   const menu = MENU_ITEMS.map((item, i) =>
@@ -225,10 +184,6 @@ function buildMainText(): string {
   return `${header}\n\n${menu}`
 }
 
-function buildVolumeText(): string {
-  return buildVolumeBar()
-}
-
 function volumeHasBorder(): boolean {
   return mode.type === 'volume' || (mode.type === 'menu' && mode.selected === VOLUME_ITEM_INDEX)
 }
@@ -236,19 +191,6 @@ function volumeHasBorder(): boolean {
 function makeContainers(): TextContainerProperty[] {
   const hasBorder = volumeHasBorder()
   return [
-    // Hidden event capture container (renders behind others due to lowest ID)
-    new TextContainerProperty({
-      containerID: CAPTURE.id,
-      containerName: CAPTURE.name,
-      xPosition: 0,
-      yPosition: 0,
-      width: DISPLAY_W,
-      height: DISPLAY_H,
-      content: ' ',
-      isEventCapture: 1,
-      borderWidth: 0,
-    }),
-    // Main text: header + menu items
     new TextContainerProperty({
       containerID: MAIN.id,
       containerName: MAIN.name,
@@ -257,10 +199,9 @@ function makeContainers(): TextContainerProperty[] {
       width: DISPLAY_W,
       height: MAIN_H,
       content: buildMainText(),
-      isEventCapture: 0,
+      isEventCapture: 1,
       borderWidth: 0,
     }),
-    // Volume bar with border highlight when selected/active
     new TextContainerProperty({
       containerID: VOL.id,
       containerName: VOL.name,
@@ -268,7 +209,7 @@ function makeContainers(): TextContainerProperty[] {
       yPosition: MAIN_H,
       width: DISPLAY_W,
       height: VOL_H,
-      content: buildVolumeText(),
+      content: buildVolumeBar(),
       isEventCapture: 0,
       borderWidth: hasBorder ? 2 : 0,
       borderColor: hasBorder ? 13 : 0,
@@ -294,17 +235,15 @@ async function updateDisplay(bridge: EvenAppBridge) {
   const hasBorder = volumeHasBorder()
 
   if (hasBorder !== lastVolBorder) {
-    // Border state changed — need full rebuild
     lastVolBorder = hasBorder
     await rebuildDisplay(bridge)
   } else {
-    // Text-only update — flicker-free
     await bridge.textContainerUpgrade(
       new TextContainerUpgrade({
         containerID: MAIN.id,
         containerName: MAIN.name,
         contentOffset: 0,
-        contentLength: 1000,
+        contentLength: 2000,
         content: buildMainText(),
       })
     )
@@ -313,8 +252,8 @@ async function updateDisplay(bridge: EvenAppBridge) {
         containerID: VOL.id,
         containerName: VOL.name,
         contentOffset: 0,
-        contentLength: 1000,
-        content: buildVolumeText(),
+        contentLength: 2000,
+        content: buildVolumeBar(),
       })
     )
   }
