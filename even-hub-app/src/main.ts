@@ -4,6 +4,8 @@ import {
   RebuildPageContainer,
   TextContainerUpgrade,
   TextContainerProperty,
+  ListContainerProperty,
+  ListItemContainerProperty,
   OsEventTypeList,
   type EvenHubEvent,
   type EvenAppBridge,
@@ -14,14 +16,15 @@ const BRIDGE_PORT = 8765
 const BRIDGE_URL = `http://localhost:${BRIDGE_PORT}`
 const SCROLL_COOLDOWN_MS = 300
 
-// Display layout — 2 containers: main (top) + volume bar (bottom)
 const DISPLAY_W = 576
 const DISPLAY_H = 288
+const HEADER_H = 48
 const VOL_H = 72
-const MAIN_H = DISPLAY_H - VOL_H
+const LIST_H = DISPLAY_H - HEADER_H - VOL_H
 
-const MAIN = { id: 1, name: 'main' }
-const VOL = { id: 2, name: 'vol' }
+const HEADER = { id: 1, name: 'header' }
+const MENU = { id: 2, name: 'menu' }
+const VOL = { id: 3, name: 'vol' }
 
 type MediaCommand = 'play-pause' | 'next' | 'prev' | 'vol-up' | 'vol-down' | 'status'
 
@@ -82,44 +85,14 @@ async function sendCommand(cmd: MediaCommand): Promise<void> {
   }
 }
 
-// --- Input parsing ---
-
-type Action = 'tap' | 'scroll-up' | 'scroll-down'
-
-let lastScrollTime = 0
-
-function parseEvent(event: EvenHubEvent): Action | null {
-  if (event.audioEvent) return null
-
-  const eventType = event.textEvent?.eventType ?? event.sysEvent?.eventType
-
-  // CLICK_EVENT = 0, SDK fromJson normalizes 0 to undefined
-  if (eventType === undefined || eventType === OsEventTypeList.CLICK_EVENT) return 'tap'
-
-  const now = Date.now()
-  if (eventType === OsEventTypeList.SCROLL_TOP_EVENT) {
-    if (now - lastScrollTime < SCROLL_COOLDOWN_MS) return null
-    lastScrollTime = now
-    return 'scroll-up'
-  }
-  if (eventType === OsEventTypeList.SCROLL_BOTTOM_EVENT) {
-    if (now - lastScrollTime < SCROLL_COOLDOWN_MS) return null
-    lastScrollTime = now
-    return 'scroll-down'
-  }
-
-  return null
-}
-
 // --- State machine ---
 
-const MENU_ITEMS: { label: string; command: MediaCommand }[] = [
+const MENU_ITEMS: { label: string; command: MediaCommand | 'volume' }[] = [
   { label: 'Play / Pause', command: 'play-pause' },
   { label: 'Next Track', command: 'next' },
   { label: 'Prev Track', command: 'prev' },
+  { label: 'Volume', command: 'volume' },
 ]
-const VOLUME_ITEM_INDEX = MENU_ITEMS.length
-const TOTAL_ITEMS = MENU_ITEMS.length + 1 // +1 for volume bar
 
 type Mode =
   | { type: 'menu'; selected: number }
@@ -127,23 +100,77 @@ type Mode =
 
 let mode: Mode = { type: 'menu', selected: 0 }
 
-async function handleAction(action: Action): Promise<void> {
+// --- Input parsing ---
+
+type Action = 'tap' | 'scroll-up' | 'scroll-down'
+
+let lastScrollTime = 0
+
+function parseEvent(event: EvenHubEvent): { action: Action; listIndex?: number } | null {
+  if (event.audioEvent) return null
+
+  // List events (menu mode) — firmware handles selection
+  if (event.listEvent) {
+    const et = event.listEvent.eventType
+    if (et === undefined || et === OsEventTypeList.CLICK_EVENT) {
+      // Firmware may omit index for item 0
+      const idx = event.listEvent.currentSelectItemIndex ?? mode.type === 'menu' ? (mode as { selected: number }).selected : 0
+      return { action: 'tap', listIndex: idx }
+    }
+    const now = Date.now()
+    if (et === OsEventTypeList.SCROLL_TOP_EVENT) {
+      if (now - lastScrollTime < SCROLL_COOLDOWN_MS) return null
+      lastScrollTime = now
+      return { action: 'scroll-up' }
+    }
+    if (et === OsEventTypeList.SCROLL_BOTTOM_EVENT) {
+      if (now - lastScrollTime < SCROLL_COOLDOWN_MS) return null
+      lastScrollTime = now
+      return { action: 'scroll-down' }
+    }
+    return null
+  }
+
+  // Text/sys events (volume mode or simulator)
+  const eventType = event.textEvent?.eventType ?? event.sysEvent?.eventType
+
+  if (eventType === undefined || eventType === OsEventTypeList.CLICK_EVENT) return { action: 'tap' }
+
+  const now = Date.now()
+  if (eventType === OsEventTypeList.SCROLL_TOP_EVENT) {
+    if (now - lastScrollTime < SCROLL_COOLDOWN_MS) return null
+    lastScrollTime = now
+    return { action: 'scroll-up' }
+  }
+  if (eventType === OsEventTypeList.SCROLL_BOTTOM_EVENT) {
+    if (now - lastScrollTime < SCROLL_COOLDOWN_MS) return null
+    lastScrollTime = now
+    return { action: 'scroll-down' }
+  }
+
+  return null
+}
+
+async function handleAction(action: Action, listIndex?: number): Promise<void> {
   if (mode.type === 'menu') {
-    if (action === 'scroll-up') {
-      mode.selected = (mode.selected + 1) % TOTAL_ITEMS
-      const name = mode.selected === VOLUME_ITEM_INDEX ? 'Volume' : MENU_ITEMS[mode.selected].label
-      addLog('NAV', `Selected: ${name}`)
-    } else if (action === 'scroll-down') {
-      mode.selected = (mode.selected - 1 + TOTAL_ITEMS) % TOTAL_ITEMS
-      const name = mode.selected === VOLUME_ITEM_INDEX ? 'Volume' : MENU_ITEMS[mode.selected].label
-      addLog('NAV', `Selected: ${name}`)
+    if (action === 'scroll-up' || action === 'scroll-down') {
+      // Firmware handles list selection visually — just track index in state
+      if (action === 'scroll-down') {
+        mode.selected = (mode.selected + 1) % MENU_ITEMS.length
+      } else {
+        mode.selected = (mode.selected - 1 + MENU_ITEMS.length) % MENU_ITEMS.length
+      }
+      addLog('NAV', `Selected: ${MENU_ITEMS[mode.selected].label}`)
     } else if (action === 'tap') {
-      if (mode.selected === VOLUME_ITEM_INDEX) {
+      const idx = listIndex ?? mode.selected
+      const item = MENU_ITEMS[idx]
+      if (!item) return
+      mode.selected = idx
+      if (item.command === 'volume') {
         mode = { type: 'volume' }
         addLog('VOL', 'Entered volume mode')
         await sendCommand('status')
       } else {
-        const item = MENU_ITEMS[mode.selected]
         addLog('ACTION', `${item.label} (${item.command})`)
         await sendCommand(item.command)
       }
@@ -156,7 +183,7 @@ async function handleAction(action: Action): Promise<void> {
       addLog('VOL', 'Volume up')
       await sendCommand('vol-up')
     } else if (action === 'tap') {
-      mode = { type: 'menu', selected: VOLUME_ITEM_INDEX }
+      mode = { type: 'menu', selected: MENU_ITEMS.length - 1 }
       addLog('VOL', 'Exited volume mode')
     }
   }
@@ -173,95 +200,134 @@ function buildVolumeBar(): string {
   return `[${bar}] ${pct}%`
 }
 
-function truncate(s: string, max: number): string {
-  return s.length <= max ? s : s.slice(0, max - 1) + '\u2026'
+let lastMode: Mode['type'] = 'menu'
+
+function buildMenuPage() {
+  const header = new TextContainerProperty({
+    containerID: HEADER.id,
+    containerName: HEADER.name,
+    xPosition: 0,
+    yPosition: 0,
+    width: DISPLAY_W,
+    height: HEADER_H,
+    content: currentTrack,
+    isEventCapture: 0,
+    borderWidth: 0,
+  })
+
+  const listItems = new ListItemContainerProperty({
+    itemCount: MENU_ITEMS.length,
+    itemWidth: DISPLAY_W - 16,
+    isItemSelectBorderEn: 1,
+    itemName: MENU_ITEMS.map(i => i.label),
+  })
+
+  const menuList = new ListContainerProperty({
+    containerID: MENU.id,
+    containerName: MENU.name,
+    xPosition: 0,
+    yPosition: HEADER_H,
+    width: DISPLAY_W,
+    height: LIST_H,
+    isEventCapture: 1,
+    borderWidth: 0,
+    paddingLength: 4,
+    itemContainer: listItems,
+  })
+
+  const volBar = new TextContainerProperty({
+    containerID: VOL.id,
+    containerName: VOL.name,
+    xPosition: 0,
+    yPosition: HEADER_H + LIST_H,
+    width: DISPLAY_W,
+    height: VOL_H,
+    content: buildVolumeBar(),
+    isEventCapture: 0,
+    borderWidth: 0,
+    paddingLength: 4,
+  })
+
+  return { textObject: [header, volBar], listObject: [menuList], count: 3 }
 }
 
-function buildMainText(): string {
-  const header = truncate(currentTrack, 40)
-  const selected = mode.type === 'menu' ? mode.selected : -1
-  const volSelected = mode.type === 'menu' && mode.selected === VOLUME_ITEM_INDEX
+function buildVolumePage() {
+  const header = new TextContainerProperty({
+    containerID: HEADER.id,
+    containerName: HEADER.name,
+    xPosition: 0,
+    yPosition: 0,
+    width: DISPLAY_W,
+    height: HEADER_H,
+    content: currentTrack,
+    isEventCapture: 0,
+    borderWidth: 0,
+  })
 
-  const menu = MENU_ITEMS.map((item, i) =>
-    i === selected ? `> ${item.label}` : `  ${item.label}`
-  ).join('\n')
+  const volBar = new TextContainerProperty({
+    containerID: VOL.id,
+    containerName: VOL.name,
+    xPosition: 0,
+    yPosition: HEADER_H,
+    width: DISPLAY_W,
+    height: DISPLAY_H - HEADER_H,
+    content: buildVolumeBar(),
+    isEventCapture: 1,
+    borderWidth: 2,
+    borderColor: 13,
+    borderRdaius: 6,
+    paddingLength: 4,
+  })
 
-  const volLine = volSelected ? '> Volume' : '  Volume'
-  return `${header}\n${menu}\n${volLine}`
-}
-
-function volumeHasBorder(): boolean {
-  return mode.type === 'volume'
-}
-
-function makeContainers(): TextContainerProperty[] {
-  const hasBorder = volumeHasBorder()
-  return [
-    new TextContainerProperty({
-      containerID: MAIN.id,
-      containerName: MAIN.name,
-      xPosition: 0,
-      yPosition: 0,
-      width: DISPLAY_W,
-      height: MAIN_H,
-      content: buildMainText(),
-      isEventCapture: 1,
-      borderWidth: 0,
-    }),
-    new TextContainerProperty({
-      containerID: VOL.id,
-      containerName: VOL.name,
-      xPosition: 0,
-      yPosition: MAIN_H,
-      width: DISPLAY_W,
-      height: VOL_H,
-      content: buildVolumeBar(),
-      isEventCapture: 0,
-      borderWidth: hasBorder ? 2 : 0,
-      borderColor: hasBorder ? 13 : 0,
-      borderRdaius: hasBorder ? 6 : 0,
-      paddingLength: 4,
-    }),
-  ]
-}
-
-let lastVolBorder = false
-
-async function rebuildDisplay(bridge: EvenAppBridge) {
-  const containers = makeContainers()
-  await bridge.rebuildPageContainer(
-    new RebuildPageContainer({
-      containerTotalNum: containers.length,
-      textObject: containers,
-    })
-  )
+  return { textObject: [header, volBar], listObject: [], count: 2 }
 }
 
 async function updateDisplay(bridge: EvenAppBridge) {
-  const hasBorder = volumeHasBorder()
+  const modeChanged = mode.type !== lastMode
+  lastMode = mode.type
 
-  if (hasBorder !== lastVolBorder) {
-    lastVolBorder = hasBorder
-    await rebuildDisplay(bridge)
+  if (modeChanged) {
+    // Mode changed — must rebuild (different container types)
+    if (mode.type === 'menu') {
+      const page = buildMenuPage()
+      await bridge.rebuildPageContainer(
+        new RebuildPageContainer({
+          containerTotalNum: page.count,
+          textObject: page.textObject,
+          listObject: page.listObject,
+        })
+      )
+    } else {
+      const page = buildVolumePage()
+      await bridge.rebuildPageContainer(
+        new RebuildPageContainer({
+          containerTotalNum: page.count,
+          textObject: page.textObject,
+        })
+      )
+    }
   } else {
+    // Same mode — update text containers in-place
     await bridge.textContainerUpgrade(
       new TextContainerUpgrade({
-        containerID: MAIN.id,
-        containerName: MAIN.name,
+        containerID: HEADER.id,
+        containerName: HEADER.name,
         contentOffset: 0,
         contentLength: 2000,
-        content: buildMainText(),
+        content: currentTrack,
       })
     )
-    await bridge.textContainerUpgrade(
-      new TextContainerUpgrade({
-        containerID: VOL.id,
-        containerName: VOL.name,
-        contentOffset: 0,
-        contentLength: 2000,
-        content: buildVolumeBar(),
-      })
-    )
+    if (mode.type === 'volume') {
+      await bridge.textContainerUpgrade(
+        new TextContainerUpgrade({
+          containerID: VOL.id,
+          containerName: VOL.name,
+          contentOffset: 0,
+          contentLength: 2000,
+          content: buildVolumeBar(),
+        })
+      )
+    }
   }
 }
 
@@ -291,24 +357,23 @@ async function main() {
     }
   })
 
-  const containers = makeContainers()
-  lastVolBorder = volumeHasBorder()
-
+  // Initial page — menu mode with list container
+  const page = buildMenuPage()
   await bridge.createStartUpPageContainer(
     new CreateStartUpPageContainer({
-      containerTotalNum: containers.length,
-      textObject: containers,
+      containerTotalNum: page.count,
+      textObject: page.textObject,
+      listObject: page.listObject,
     })
   )
 
   await sendCommand('status')
-  await updateDisplay(bridge)
   addLog('INIT', 'Ready')
 
   bridge.onEvenHubEvent(async (event: EvenHubEvent) => {
-    const action = parseEvent(event)
-    if (!action) return
-    await handleAction(action)
+    const parsed = parseEvent(event)
+    if (!parsed) return
+    await handleAction(parsed.action, parsed.listIndex)
     await updateDisplay(bridge)
   })
 }
