@@ -9,8 +9,8 @@ import android.media.AudioManager
 import android.media.MediaMetadata
 import android.media.session.MediaController
 import android.media.session.MediaSessionManager
-import android.media.session.PlaybackState
 import android.os.Build
+import android.view.KeyEvent
 import android.os.IBinder
 import android.util.Base64
 import androidx.core.app.NotificationCompat
@@ -78,16 +78,15 @@ class MediaBridgeService : Service() {
  * Tiny HTTP server on localhost that translates REST calls into Android media commands.
  *
  * Endpoints (all POST):
- *   /play      - resume playback
- *   /pause     - pause playback
- *   /next      - skip to next track
- *   /prev      - skip to previous track
- *   /vol-up    - increase media volume
- *   /vol-down  - decrease media volume
+ *   /play-pause - toggle play/pause
+ *   /next       - skip to next track
+ *   /prev       - skip to previous track
+ *   /vol-up     - increase media volume
+ *   /vol-down   - decrease media volume
  *   /vol-set?v=N - set volume to N (0..maxVolume)
  *   /seek?pos=N  - seek to position N (milliseconds)
- *   /status    - get current playback state
- *   /art       - get album art as base64 PNG
+ *   /status     - get current playback state
+ *   /art        - get album art as base64 PNG
  */
 class MediaHttpServer(
     port: Int,
@@ -119,8 +118,9 @@ class MediaHttpServer(
         }
 
         when (session.uri) {
-            "/play" -> transport?.play()
-            "/pause" -> transport?.pause()
+            "/play-pause" -> controller?.dispatchMediaButtonEvent(
+                KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE)
+            )
             "/next" -> transport?.skipToNext()
             "/prev" -> transport?.skipToPrevious()
             "/vol-up" -> audio.adjustStreamVolume(
