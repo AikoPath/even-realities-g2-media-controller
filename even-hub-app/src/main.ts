@@ -173,19 +173,25 @@ function buildVolumeBar(): string {
   return `[${bar}] ${pct}%`
 }
 
+function truncate(s: string, max: number): string {
+  return s.length <= max ? s : s.slice(0, max - 1) + '\u2026'
+}
+
 function buildMainText(): string {
-  const header = currentTrack
+  const header = truncate(currentTrack, 40)
   const selected = mode.type === 'menu' ? mode.selected : -1
+  const volSelected = mode.type === 'menu' && mode.selected === VOLUME_ITEM_INDEX
 
   const menu = MENU_ITEMS.map((item, i) =>
     i === selected ? `> ${item.label}` : `  ${item.label}`
   ).join('\n')
 
-  return `${header}\n\n${menu}`
+  const volLine = volSelected ? '> Volume' : '  Volume'
+  return `${header}\n${menu}\n${volLine}`
 }
 
 function volumeHasBorder(): boolean {
-  return mode.type === 'volume' || (mode.type === 'menu' && mode.selected === VOLUME_ITEM_INDEX)
+  return mode.type === 'volume'
 }
 
 function makeContainers(): TextContainerProperty[] {
