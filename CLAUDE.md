@@ -11,6 +11,7 @@
 
 - Always commit and push new or changed files immediately after creating/editing them. Do not wait for reminders or hooks.
 - **ALWAYS** include a PR link immediately after every push. No exceptions. Do not wait to be asked.
+- **For every set of changes, create a new branch and open a new PR.** Do not pile unrelated changes onto an existing branch.
 
 ## Even Realities G2 — EvenHub SDK Patterns
 
