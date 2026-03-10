@@ -31,18 +31,23 @@
 
 ### Container Types
 
-| Type | Limits | Scrollable | Notes |
-|------|--------|-----------|-------|
-| Text | 1000 chars (create/rebuild), 2000 (upgrade) | Yes if event capture | `borderWidth`, `borderColor`, `borderRdaius` (SDK typo), `paddingLength` |
-| List | 20 items, 64 chars each | Yes (firmware-native) | Firmware handles highlight. Takes over scroll events as `listEvent` |
-| Image | 20-200px W, 20-100px H | No | Must `updateImageRawData` after page create |
+| Type | Limits | Scrollable | Update method | Notes |
+|------|--------|-----------|---------------|-------|
+| Text | 1000 chars (create/rebuild), 2000 (upgrade) | Yes if event capture | `textContainerUpgrade()` | `borderWidth`, `borderColor`, `borderRdaius` (SDK typo), `paddingLength` |
+| List | 20 items, 64 chars each | Yes (firmware-native) | `rebuildPageContainer()` only | Firmware handles highlight & scroll. Events arrive as `listEvent` with `currentSelectItemIndex` and `currentSelectItemName` |
+| Image | 20-200px W, 20-100px H | No | `updateImageRawData()` | Must call after page create; no data during startup stage |
+
+- **Text with event capture scrolls at firmware level** — the firmware scrolls the content on scroll gestures. Use list containers for menus to avoid unwanted content scrolling.
+- **List containers have no upgrade method** — to change list items, you must `rebuildPageContainer`. Use lists for static menus.
+- **List scroll is firmware-native** — firmware moves the selection highlight automatically. `listEvent` tells you what was selected. Don't manually track scroll position.
 
 ### Page Lifecycle
 
-- `createStartUpPageContainer()` — once at startup.
-- `rebuildPageContainer()` — full page replacement (causes flicker on real hardware, resets scroll/selection).
-- `textContainerUpgrade()` — in-place text update, flicker-free. Preferred for content changes.
-- Only use `rebuildPageContainer` when container properties (border, layout) need to change.
+- `createStartUpPageContainer()` — called **once** at startup. Subsequent calls are ignored by the host.
+- `rebuildPageContainer()` — full page replacement (causes flicker on real hardware, resets scroll/selection). Same parameter structure as create.
+- `textContainerUpgrade()` — in-place text update, flicker-free. **Text containers only** — no equivalent for list containers.
+- Only use `rebuildPageContainer` when container properties (border, layout, isEventCapture) need to change.
+- **Do NOT call `textContainerUpgrade` unnecessarily** — calling it while a list container is active on the page can interfere with the list display.
 
 ### Input Events
 
