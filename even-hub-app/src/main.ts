@@ -138,7 +138,7 @@ function parseEvent(event: EvenHubEvent): { action: Action; listIndex?: number }
   return scroll ? { action: scroll } : null
 }
 
-async function handleAction(action: Action, listIndex?: number): Promise<void> {
+async function handleAction(action: Action, listIndex?: number): Promise<boolean> {
   if (mode.type === 'menu') {
     if (action === 'scroll-up' || action === 'scroll-down') {
       // Firmware handles list selection visually — just track index in state
@@ -148,10 +148,11 @@ async function handleAction(action: Action, listIndex?: number): Promise<void> {
         mode.selected = (mode.selected - 1 + MENU_ITEMS.length) % MENU_ITEMS.length
       }
       addLog('NAV', `Selected: ${MENU_ITEMS[mode.selected].label}`)
+      return false // firmware handles the visual update
     } else if (action === 'tap') {
       const idx = listIndex ?? mode.selected
       const item = MENU_ITEMS[idx]
-      if (!item) return
+      if (!item) return false
       mode.selected = idx
       if (item.command === 'volume') {
         mode = { type: 'volume' }
@@ -161,6 +162,7 @@ async function handleAction(action: Action, listIndex?: number): Promise<void> {
         addLog('ACTION', `${item.label} (${item.command})`)
         await sendCommand(item.command)
       }
+      return true
     }
   } else if (mode.type === 'volume') {
     if (action === 'scroll-up') {
@@ -173,7 +175,9 @@ async function handleAction(action: Action, listIndex?: number): Promise<void> {
       mode = { type: 'menu', selected: MENU_ITEMS.length - 1 }
       addLog('VOL', 'Exited volume mode')
     }
+    return true
   }
+  return false
 }
 
 // --- Glasses display ---
@@ -318,8 +322,8 @@ async function main() {
   bridge.onEvenHubEvent(async (event: EvenHubEvent) => {
     const parsed = parseEvent(event)
     if (!parsed) return
-    await handleAction(parsed.action, parsed.listIndex)
-    await updateDisplay(bridge)
+    const needsDisplayUpdate = await handleAction(parsed.action, parsed.listIndex)
+    if (needsDisplayUpdate) await updateDisplay(bridge)
   })
 }
 
