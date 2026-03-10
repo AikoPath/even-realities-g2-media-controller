@@ -164,7 +164,6 @@ class MediaHttpServer(
         // Build status response
         val state = controller?.playbackState
         val metadata = controller?.metadata
-        val isPlaying = state?.state == PlaybackState.STATE_PLAYING
         val title = metadata?.getString(MediaMetadata.METADATA_KEY_TITLE) ?: "Unknown"
         val artist = metadata?.getString(MediaMetadata.METADATA_KEY_ARTIST) ?: ""
         val position = state?.position ?: 0L
@@ -174,7 +173,6 @@ class MediaHttpServer(
 
         val json = buildString {
             append("{")
-            append("\"playing\":$isPlaying,")
             append("\"title\":\"${escapeJson(title)}\",")
             append("\"artist\":\"${escapeJson(artist)}\",")
             append("\"position\":$position,")

@@ -62,7 +62,6 @@ function updateMediaStatus() {
 
 let currentTrack = 'No media'
 let volume = -1
-let lastPlayCmd: 'play' | 'pause' = 'play'
 
 async function sendCommand(cmd: MediaCommand): Promise<void> {
   try {
@@ -118,9 +117,10 @@ function parseEvent(event: EvenHubEvent): Action | null {
 // --- State machine ---
 
 const MENU_ITEMS: { label: string; command: () => MediaCommand }[] = [
-  { label: 'Play / Pause', command: () => lastPlayCmd === 'play' ? 'pause' : 'play' },
-  { label: 'Next Track',   command: () => 'next' },
-  { label: 'Prev Track',   command: () => 'prev' },
+  { label: 'Play',       command: () => 'play' as MediaCommand },
+  { label: 'Pause',      command: () => 'pause' as MediaCommand },
+  { label: 'Next Track', command: () => 'next' as MediaCommand },
+  { label: 'Prev Track', command: () => 'prev' as MediaCommand },
 ]
 const VOLUME_ITEM_INDEX = MENU_ITEMS.length
 const TOTAL_ITEMS = MENU_ITEMS.length + 1 // +1 for volume bar
@@ -149,7 +149,6 @@ async function handleAction(action: Action): Promise<void> {
       } else {
         const item = MENU_ITEMS[mode.selected]
         const cmd = item.command()
-        if (cmd === 'play' || cmd === 'pause') lastPlayCmd = cmd
         addLog('ACTION', `${item.label} (${cmd})`)
         await sendCommand(cmd)
       }
