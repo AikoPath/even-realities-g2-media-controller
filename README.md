@@ -40,7 +40,7 @@ A web app that runs inside the Even Realities app WebView. Displays media info o
 5. Tap items 0-2 → send command (`play-pause`/`next`/`prev`)
 6. Tap item 3 (volume bar) → toggle volume adjust mode:
    - Border appears around volume bar
-   - Scroll up/down → `vol-down`/`vol-up`
+   - Scroll up/down → `vol-up`/`vol-down`
    - Tap again → border removed, scroll works normally again
 7. Volume bar = full screen width (576px)
 8. Commands passed directly to Android bridge — no extra logic
