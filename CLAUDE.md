@@ -45,10 +45,8 @@
 ### Page Lifecycle
 
 - `createStartUpPageContainer()` — called **once** at startup. Subsequent calls are ignored by the host.
-- `rebuildPageContainer()` — full page replacement (causes flicker on real hardware, resets scroll/selection). Same parameter structure as create.
-- `textContainerUpgrade()` — in-place text update, flicker-free. **Text containers only** — no equivalent for list containers.
-- Only use `rebuildPageContainer` when container properties (border, layout, isEventCapture) need to change.
-- **Do NOT call `textContainerUpgrade` unnecessarily** — calling it while a list container is active on the page can interfere with the list display.
+- `rebuildPageContainer()` — full page replacement. Same parameter structure as create.
+- `textContainerUpgrade()` — in-place text update. **Text containers only** — no equivalent for list containers.
 
 ### Input Events
 

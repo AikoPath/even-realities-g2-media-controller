@@ -2,8 +2,6 @@ import {
   waitForEvenAppBridge,
   CreateStartUpPageContainer,
   RebuildPageContainer,
-  TextContainerUpgrade,
-  TextContainerProperty,
   ListContainerProperty,
   ListItemContainerProperty,
   OsEventTypeList,
@@ -16,11 +14,8 @@ const BRIDGE_URL = `http://localhost:${BRIDGE_PORT}`
 
 const DISPLAY_W = 576
 const DISPLAY_H = 288
-const VOL_H = 72
-const LIST_H = DISPLAY_H - VOL_H
 
 const MENU = { id: 1, name: 'menu' }
-const VOL = { id: 2, name: 'vol' }
 
 const MENU_LABELS = ['Play/Pause', 'Next Track', 'Prev Track']
 const MENU_COMMANDS: MediaCommand[] = ['play-pause', 'next', 'prev']
@@ -93,16 +88,16 @@ function parseEvent(event: EvenHubEvent): { action: Action; listIndex?: number }
         ?? (mode.type === 'menu' ? mode.selected : 0)
       return { action: 'tap', listIndex: idx }
     }
-    if (et === OsEventTypeList.SCROLL_TOP_EVENT) return { action: 'scroll-up' }
-    if (et === OsEventTypeList.SCROLL_BOTTOM_EVENT) return { action: 'scroll-down' }
+    if (et === OsEventTypeList.SCROLL_TOP_EVENT) return { action: 'scroll-down' }
+    if (et === OsEventTypeList.SCROLL_BOTTOM_EVENT) return { action: 'scroll-up' }
     return null
   }
 
   // Text/sys events (volume mode or simulator)
   const eventType = event.textEvent?.eventType ?? event.sysEvent?.eventType
   if (eventType === undefined || eventType === OsEventTypeList.CLICK_EVENT) return { action: 'tap' }
-  if (eventType === OsEventTypeList.SCROLL_TOP_EVENT) return { action: 'scroll-up' }
-  if (eventType === OsEventTypeList.SCROLL_BOTTOM_EVENT) return { action: 'scroll-down' }
+  if (eventType === OsEventTypeList.SCROLL_TOP_EVENT) return { action: 'scroll-down' }
+  if (eventType === OsEventTypeList.SCROLL_BOTTOM_EVENT) return { action: 'scroll-up' }
   return null
 }
 
@@ -134,11 +129,11 @@ async function handleAction(action: Action, listIndex?: number): Promise<boolean
     }
   } else if (mode.type === 'volume') {
     if (action === 'scroll-up') {
-      addLog('VOL', 'Volume down')
-      await sendCommand('vol-down')
-    } else if (action === 'scroll-down') {
       addLog('VOL', 'Volume up')
       await sendCommand('vol-up')
+    } else if (action === 'scroll-down') {
+      addLog('VOL', 'Volume down')
+      await sendCommand('vol-down')
     } else if (action === 'tap') {
       mode = { type: 'menu', selected: 3 }
       addLog('VOL', 'Exited volume mode')
@@ -151,7 +146,7 @@ async function handleAction(action: Action, listIndex?: number): Promise<boolean
 // --- Glasses display ---
 
 function buildVolumeBar(): string {
-  if (volume < 0) return 'Volume'
+  if (volume < 0) return `[${'─'.repeat(15)}] --%`
   const pct = Math.round((volume / 160) * 100)
   const maxBlocks = 15
   const filled = Math.round((pct / 100) * maxBlocks)
@@ -159,13 +154,11 @@ function buildVolumeBar(): string {
   return `[${bar}] ${pct}%`
 }
 
-let lastMode: Mode['type'] = 'menu'
-
 function buildPage(inVolumeMode: boolean) {
   const listItems = new ListItemContainerProperty({
     itemCount: ITEM_COUNT,
-    itemWidth: DISPLAY_W - 16,
-    isItemSelectBorderEn: 1,
+    itemWidth: DISPLAY_W,
+    isItemSelectBorderEn: inVolumeMode ? 1 : 0,
     itemName: [...MENU_LABELS, buildVolumeBar()],
   })
 
@@ -175,55 +168,24 @@ function buildPage(inVolumeMode: boolean) {
     xPosition: 0,
     yPosition: 0,
     width: DISPLAY_W,
-    height: LIST_H,
-    isEventCapture: inVolumeMode ? 0 : 1,
+    height: DISPLAY_H,
+    isEventCapture: 1,
     borderWidth: 0,
     paddingLength: 4,
     itemContainer: listItems,
   })
 
-  const volBar = new TextContainerProperty({
-    containerID: VOL.id,
-    containerName: VOL.name,
-    xPosition: 0,
-    yPosition: LIST_H,
-    width: DISPLAY_W,
-    height: VOL_H,
-    content: buildVolumeBar(),
-    isEventCapture: inVolumeMode ? 1 : 0,
-    borderWidth: inVolumeMode ? 2 : 0,
-    borderColor: inVolumeMode ? 13 : 0,
-    borderRdaius: inVolumeMode ? 6 : 0,
-    paddingLength: 4,
-  })
-
-  return { textObject: [volBar], listObject: [menuList], count: 2 }
+  return { listObject: [menuList], count: 1 }
 }
 
 async function updateDisplay(bridge: EvenAppBridge) {
-  const modeChanged = mode.type !== lastMode
-  lastMode = mode.type
-
-  if (modeChanged) {
-    const page = buildPage(mode.type === 'volume')
-    await bridge.rebuildPageContainer(
-      new RebuildPageContainer({
-        containerTotalNum: page.count,
-        textObject: page.textObject,
-        listObject: page.listObject,
-      })
-    )
-  } else if (mode.type === 'volume') {
-    await bridge.textContainerUpgrade(
-      new TextContainerUpgrade({
-        containerID: VOL.id,
-        containerName: VOL.name,
-        contentOffset: 0,
-        contentLength: 2000,
-        content: buildVolumeBar(),
-      })
-    )
-  }
+  const page = buildPage(mode.type === 'volume')
+  await bridge.rebuildPageContainer(
+    new RebuildPageContainer({
+      containerTotalNum: page.count,
+      listObject: page.listObject,
+    })
+  )
 }
 
 // --- Main ---
@@ -241,7 +203,6 @@ async function main() {
   await bridge.createStartUpPageContainer(
     new CreateStartUpPageContainer({
       containerTotalNum: page.count,
-      textObject: page.textObject,
       listObject: page.listObject,
     })
   )
