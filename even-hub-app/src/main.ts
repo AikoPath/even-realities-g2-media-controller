@@ -2,6 +2,8 @@ import {
   waitForEvenAppBridge,
   CreateStartUpPageContainer,
   RebuildPageContainer,
+  TextContainerProperty,
+  TextContainerUpgrade,
   ListContainerProperty,
   ListItemContainerProperty,
   OsEventTypeList,
@@ -14,8 +16,11 @@ const BRIDGE_URL = `http://localhost:${BRIDGE_PORT}`
 
 const DISPLAY_W = 576
 const DISPLAY_H = 288
+const VOL_H = 72
+const LIST_H = DISPLAY_H - VOL_H
 
 const MENU = { id: 1, name: 'menu' }
+const VOL = { id: 2, name: 'vol' }
 
 const MENU_LABELS = ['Play/Pause', 'Next Track', 'Prev Track']
 const MENU_COMMANDS: MediaCommand[] = ['play-pause', 'next', 'prev']
@@ -121,11 +126,12 @@ async function handleAction(action: Action, listIndex?: number): Promise<boolean
         mode = { type: 'volume' }
         addLog('VOL', 'Entered volume mode')
         await sendCommand('status')
+        return true // rebuild to switch event capture to text container
       } else {
         addLog('ACTION', `${MENU_LABELS[idx]} (${MENU_COMMANDS[idx]})`)
         await sendCommand(MENU_COMMANDS[idx])
+        return false // no visual change needed
       }
-      return true
     }
   } else if (mode.type === 'volume') {
     if (action === 'scroll-up') {
@@ -154,12 +160,14 @@ function buildVolumeBar(): string {
   return `[${bar}] ${pct}%`
 }
 
+let lastMode: Mode['type'] = 'menu'
+
 function buildPage(inVolumeMode: boolean) {
   const listItems = new ListItemContainerProperty({
     itemCount: ITEM_COUNT,
     itemWidth: DISPLAY_W,
-    isItemSelectBorderEn: inVolumeMode ? 1 : 0,
-    itemName: [...MENU_LABELS, buildVolumeBar()],
+    isItemSelectBorderEn: 0,
+    itemName: [...MENU_LABELS, 'Volume'],
   })
 
   const menuList = new ListContainerProperty({
@@ -168,24 +176,55 @@ function buildPage(inVolumeMode: boolean) {
     xPosition: 0,
     yPosition: 0,
     width: DISPLAY_W,
-    height: DISPLAY_H,
-    isEventCapture: 1,
+    height: LIST_H,
+    isEventCapture: inVolumeMode ? 0 : 1,
     borderWidth: 0,
     paddingLength: 4,
     itemContainer: listItems,
   })
 
-  return { listObject: [menuList], count: 1 }
+  const volBar = new TextContainerProperty({
+    containerID: VOL.id,
+    containerName: VOL.name,
+    xPosition: 0,
+    yPosition: LIST_H,
+    width: DISPLAY_W,
+    height: VOL_H,
+    content: buildVolumeBar(),
+    isEventCapture: inVolumeMode ? 1 : 0,
+    borderWidth: inVolumeMode ? 2 : 0,
+    borderColor: inVolumeMode ? 13 : 0,
+    borderRdaius: inVolumeMode ? 6 : 0,
+    paddingLength: 4,
+  })
+
+  return { textObject: [volBar], listObject: [menuList], count: 2 }
 }
 
 async function updateDisplay(bridge: EvenAppBridge) {
-  const page = buildPage(mode.type === 'volume')
-  await bridge.rebuildPageContainer(
-    new RebuildPageContainer({
-      containerTotalNum: page.count,
-      listObject: page.listObject,
-    })
-  )
+  const modeChanged = mode.type !== lastMode
+  lastMode = mode.type
+
+  if (modeChanged) {
+    const page = buildPage(mode.type === 'volume')
+    await bridge.rebuildPageContainer(
+      new RebuildPageContainer({
+        containerTotalNum: page.count,
+        textObject: page.textObject,
+        listObject: page.listObject,
+      })
+    )
+  } else if (mode.type === 'volume') {
+    await bridge.textContainerUpgrade(
+      new TextContainerUpgrade({
+        containerID: VOL.id,
+        containerName: VOL.name,
+        contentOffset: 0,
+        contentLength: 2000,
+        content: buildVolumeBar(),
+      })
+    )
+  }
 }
 
 // --- Main ---
@@ -203,6 +242,7 @@ async function main() {
   await bridge.createStartUpPageContainer(
     new CreateStartUpPageContainer({
       containerTotalNum: page.count,
+      textObject: page.textObject,
       listObject: page.listObject,
     })
   )
