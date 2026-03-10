@@ -264,13 +264,33 @@ function buildVolumePage() {
     borderWidth: 0,
   })
 
+  const listItems = new ListItemContainerProperty({
+    itemCount: MENU_ITEMS.length,
+    itemWidth: DISPLAY_W - 16,
+    isItemSelectBorderEn: 1,
+    itemName: MENU_ITEMS.map(i => i.label),
+  })
+
+  const menuList = new ListContainerProperty({
+    containerID: MENU.id,
+    containerName: MENU.name,
+    xPosition: 0,
+    yPosition: HEADER_H,
+    width: DISPLAY_W,
+    height: LIST_H,
+    isEventCapture: 0,
+    borderWidth: 0,
+    paddingLength: 4,
+    itemContainer: listItems,
+  })
+
   const volBar = new TextContainerProperty({
     containerID: VOL.id,
     containerName: VOL.name,
     xPosition: 0,
-    yPosition: HEADER_H,
+    yPosition: HEADER_H + LIST_H,
     width: DISPLAY_W,
-    height: DISPLAY_H - HEADER_H,
+    height: VOL_H,
     content: buildVolumeBar(),
     isEventCapture: 1,
     borderWidth: 2,
@@ -279,7 +299,7 @@ function buildVolumePage() {
     paddingLength: 4,
   })
 
-  return { textObject: [header, volBar], listObject: [], count: 2 }
+  return { textObject: [header, volBar], listObject: [menuList], count: 3 }
 }
 
 async function updateDisplay(bridge: EvenAppBridge) {
@@ -303,6 +323,7 @@ async function updateDisplay(bridge: EvenAppBridge) {
         new RebuildPageContainer({
           containerTotalNum: page.count,
           textObject: page.textObject,
+          listObject: page.listObject,
         })
       )
     }
