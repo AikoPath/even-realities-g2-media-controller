@@ -127,7 +127,6 @@ function parseEvent(event: EvenHubEvent): { action: Action; listIndex?: number }
         ?? (mode.type === 'menu' ? mode.selected : 0)
       return { action: 'tap', listIndex: idx }
     }
-    if (et === undefined) return null
     const scroll = throttledScroll(et)
     return scroll ? { action: scroll } : null
   }
