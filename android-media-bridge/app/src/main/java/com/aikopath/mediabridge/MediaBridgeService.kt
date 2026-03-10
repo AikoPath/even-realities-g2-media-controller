@@ -125,23 +125,16 @@ class MediaHttpServer(
         }
 
         // Build status response
-        val state = controller?.playbackState
         val metadata = controller?.metadata
         val title = metadata?.getString(MediaMetadata.METADATA_KEY_TITLE) ?: "Unknown"
         val artist = metadata?.getString(MediaMetadata.METADATA_KEY_ARTIST) ?: ""
-        val position = state?.position ?: 0L
-        val duration = metadata?.getLong(MediaMetadata.METADATA_KEY_DURATION) ?: 0L
         val volume = audio.getStreamVolume(AudioManager.STREAM_MUSIC)
-        val maxVolume = audio.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
 
         val json = buildString {
             append("{")
             append("\"title\":\"${escapeJson(title)}\",")
             append("\"artist\":\"${escapeJson(artist)}\",")
-            append("\"position\":$position,")
-            append("\"duration\":$duration,")
-            append("\"volume\":$volume,")
-            append("\"maxVolume\":$maxVolume")
+            append("\"volume\":$volume")
             append("}")
         }
         return jsonResponse(json, headers)
