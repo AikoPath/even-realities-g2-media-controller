@@ -113,10 +113,10 @@ function parseEvent(event: EvenHubEvent): Action | null {
 
 // --- State machine ---
 
-const MENU_ITEMS: { label: string; command: () => MediaCommand }[] = [
-  { label: 'Play / Pause', command: () => 'play-pause' },
-  { label: 'Next Track', command: () => 'next' },
-  { label: 'Prev Track', command: () => 'prev' },
+const MENU_ITEMS: { label: string; command: MediaCommand }[] = [
+  { label: 'Play / Pause', command: 'play-pause' },
+  { label: 'Next Track', command: 'next' },
+  { label: 'Prev Track', command: 'prev' },
 ]
 const VOLUME_ITEM_INDEX = MENU_ITEMS.length
 const TOTAL_ITEMS = MENU_ITEMS.length + 1 // +1 for volume bar
@@ -144,9 +144,8 @@ async function handleAction(action: Action): Promise<void> {
         await sendCommand('status')
       } else {
         const item = MENU_ITEMS[mode.selected]
-        const cmd = item.command()
-        addLog('ACTION', `${item.label} (${cmd})`)
-        await sendCommand(cmd)
+        addLog('ACTION', `${item.label} (${item.command})`)
+        await sendCommand(item.command)
       }
     }
   } else if (mode.type === 'volume') {
