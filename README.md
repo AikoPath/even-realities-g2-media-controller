@@ -33,10 +33,10 @@ A web app that runs inside the Even Realities app WebView. Displays media info o
 
 | Gesture | Action |
 |---------|--------|
-| Single tap | Play / Pause |
-| Double tap | Next track |
-| Scroll up | Volume up |
-| Scroll down | Volume down |
+| Scroll | Navigate menu items |
+| Single tap | Activate selected item |
+
+Menu items: Play / Pause, Next Track, Prev Track, Volume (enters volume adjust mode).
 
 **Tech:** TypeScript + Vite + Even Hub SDK
 

@@ -62,6 +62,7 @@ function updateMediaStatus() {
 
 let currentTrack = 'No media'
 let volume = -1
+let shouldPlay = true
 
 async function sendCommand(cmd: MediaCommand): Promise<void> {
   try {
@@ -86,7 +87,7 @@ async function sendCommand(cmd: MediaCommand): Promise<void> {
 
 // --- Input parsing ---
 
-type Action = 'tap' | 'double-tap' | 'scroll-up' | 'scroll-down'
+type Action = 'tap' | 'scroll-up' | 'scroll-down'
 
 let lastScrollTime = 0
 
@@ -97,7 +98,6 @@ function parseEvent(event: EvenHubEvent): Action | null {
 
   // CLICK_EVENT = 0, SDK fromJson normalizes 0 to undefined
   if (eventType === undefined || eventType === OsEventTypeList.CLICK_EVENT) return 'tap'
-  if (eventType === OsEventTypeList.DOUBLE_CLICK_EVENT) return 'double-tap'
 
   const now = Date.now()
   if (eventType === OsEventTypeList.SCROLL_TOP_EVENT) {
@@ -117,10 +117,13 @@ function parseEvent(event: EvenHubEvent): Action | null {
 // --- State machine ---
 
 const MENU_ITEMS: { label: string; command: () => MediaCommand }[] = [
-  { label: 'Play',       command: () => 'play' as MediaCommand },
-  { label: 'Pause',      command: () => 'pause' as MediaCommand },
-  { label: 'Next Track', command: () => 'next' as MediaCommand },
-  { label: 'Prev Track', command: () => 'prev' as MediaCommand },
+  { label: 'Play / Pause', command: () => {
+    const cmd = shouldPlay ? 'play' : 'pause'
+    shouldPlay = !shouldPlay
+    return cmd
+  }},
+  { label: 'Next Track', command: () => 'next' },
+  { label: 'Prev Track', command: () => 'prev' },
 ]
 const VOLUME_ITEM_INDEX = MENU_ITEMS.length
 const TOTAL_ITEMS = MENU_ITEMS.length + 1 // +1 for volume bar
