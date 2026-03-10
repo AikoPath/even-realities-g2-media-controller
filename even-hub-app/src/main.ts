@@ -167,7 +167,7 @@ function buildPage(inVolumeMode: boolean) {
     itemCount: ITEM_COUNT,
     itemWidth: DISPLAY_W,
     isItemSelectBorderEn: 0,
-    itemName: [...MENU_LABELS, 'Volume'],
+    itemName: [...MENU_LABELS, buildVolumeBar()],
   })
 
   const menuList = new ListContainerProperty({
