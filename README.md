@@ -46,6 +46,12 @@ A web app that runs inside the Even Realities app WebView. Displays media info o
 8. Commands passed directly to Android bridge — no extra logic
 9. No extra features, no extra code beyond what is described above
 
+#### Phone UI (WebView page)
+
+- Glasses connection status dot (yellow → green)
+- Action log: timestamped list of every gesture, command, and mode change
+- App version display
+
 **Tech:** TypeScript + Vite + Even Hub SDK
 
 ### 2. Android Media Bridge (`android-media-bridge/`)
