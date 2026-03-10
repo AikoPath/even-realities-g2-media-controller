@@ -23,7 +23,7 @@ const MAIN_H = DISPLAY_H - VOL_H
 const MAIN = { id: 1, name: 'main' }
 const VOL = { id: 2, name: 'vol' }
 
-type MediaCommand = 'play' | 'pause' | 'next' | 'prev' | 'vol-up' | 'vol-down' | 'status'
+type MediaCommand = 'play-pause' | 'next' | 'prev' | 'vol-up' | 'vol-down' | 'status'
 
 declare const __APP_VERSION__: string
 
@@ -62,7 +62,6 @@ function updateMediaStatus() {
 
 let currentTrack = 'No media'
 let volume = -1
-let shouldPlay = true
 
 async function sendCommand(cmd: MediaCommand): Promise<void> {
   try {
@@ -71,8 +70,6 @@ async function sendCommand(cmd: MediaCommand): Promise<void> {
       const data = await res.json()
       if (data.title) {
         currentTrack = data.artist ? `${data.artist} - ${data.title}` : data.title
-      } else if (data.track) {
-        currentTrack = data.track
       }
       if (data.volume !== undefined) volume = data.volume
       setStatus('bridge', 'dot-green', 'Bridge: connected')
@@ -117,11 +114,7 @@ function parseEvent(event: EvenHubEvent): Action | null {
 // --- State machine ---
 
 const MENU_ITEMS: { label: string; command: () => MediaCommand }[] = [
-  { label: 'Play / Pause', command: () => {
-    const cmd = shouldPlay ? 'play' : 'pause'
-    shouldPlay = !shouldPlay
-    return cmd
-  }},
+  { label: 'Play / Pause', command: () => 'play-pause' },
   { label: 'Next Track', command: () => 'next' },
   { label: 'Prev Track', command: () => 'prev' },
 ]
