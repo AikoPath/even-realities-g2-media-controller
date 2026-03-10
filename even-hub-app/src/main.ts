@@ -106,6 +106,15 @@ type Action = 'tap' | 'scroll-up' | 'scroll-down'
 
 let lastScrollTime = 0
 
+function throttledScroll(eventType: OsEventTypeList): Action | null {
+  const now = Date.now()
+  if (now - lastScrollTime < SCROLL_COOLDOWN_MS) return null
+  lastScrollTime = now
+  if (eventType === OsEventTypeList.SCROLL_TOP_EVENT) return 'scroll-up'
+  if (eventType === OsEventTypeList.SCROLL_BOTTOM_EVENT) return 'scroll-down'
+  return null
+}
+
 function parseEvent(event: EvenHubEvent): { action: Action; listIndex?: number } | null {
   if (event.audioEvent) return null
 
@@ -114,41 +123,20 @@ function parseEvent(event: EvenHubEvent): { action: Action; listIndex?: number }
     const et = event.listEvent.eventType
     if (et === undefined || et === OsEventTypeList.CLICK_EVENT) {
       // Firmware may omit index for item 0
-      const idx = event.listEvent.currentSelectItemIndex ?? mode.type === 'menu' ? (mode as { selected: number }).selected : 0
+      const idx = event.listEvent.currentSelectItemIndex
+        ?? (mode.type === 'menu' ? mode.selected : 0)
       return { action: 'tap', listIndex: idx }
     }
-    const now = Date.now()
-    if (et === OsEventTypeList.SCROLL_TOP_EVENT) {
-      if (now - lastScrollTime < SCROLL_COOLDOWN_MS) return null
-      lastScrollTime = now
-      return { action: 'scroll-up' }
-    }
-    if (et === OsEventTypeList.SCROLL_BOTTOM_EVENT) {
-      if (now - lastScrollTime < SCROLL_COOLDOWN_MS) return null
-      lastScrollTime = now
-      return { action: 'scroll-down' }
-    }
-    return null
+    if (et === undefined) return null
+    const scroll = throttledScroll(et)
+    return scroll ? { action: scroll } : null
   }
 
   // Text/sys events (volume mode or simulator)
   const eventType = event.textEvent?.eventType ?? event.sysEvent?.eventType
-
   if (eventType === undefined || eventType === OsEventTypeList.CLICK_EVENT) return { action: 'tap' }
-
-  const now = Date.now()
-  if (eventType === OsEventTypeList.SCROLL_TOP_EVENT) {
-    if (now - lastScrollTime < SCROLL_COOLDOWN_MS) return null
-    lastScrollTime = now
-    return { action: 'scroll-up' }
-  }
-  if (eventType === OsEventTypeList.SCROLL_BOTTOM_EVENT) {
-    if (now - lastScrollTime < SCROLL_COOLDOWN_MS) return null
-    lastScrollTime = now
-    return { action: 'scroll-down' }
-  }
-
-  return null
+  const scroll = throttledScroll(eventType)
+  return scroll ? { action: scroll } : null
 }
 
 async function handleAction(action: Action, listIndex?: number): Promise<void> {
@@ -202,7 +190,7 @@ function buildVolumeBar(): string {
 
 let lastMode: Mode['type'] = 'menu'
 
-function buildMenuPage() {
+function buildPage(inVolumeMode: boolean) {
   const header = new TextContainerProperty({
     containerID: HEADER.id,
     containerName: HEADER.name,
@@ -229,7 +217,7 @@ function buildMenuPage() {
     yPosition: HEADER_H,
     width: DISPLAY_W,
     height: LIST_H,
-    isEventCapture: 1,
+    isEventCapture: inVolumeMode ? 0 : 1,
     borderWidth: 0,
     paddingLength: 4,
     itemContainer: listItems,
@@ -243,59 +231,10 @@ function buildMenuPage() {
     width: DISPLAY_W,
     height: VOL_H,
     content: buildVolumeBar(),
-    isEventCapture: 0,
-    borderWidth: 0,
-    paddingLength: 4,
-  })
-
-  return { textObject: [header, volBar], listObject: [menuList], count: 3 }
-}
-
-function buildVolumePage() {
-  const header = new TextContainerProperty({
-    containerID: HEADER.id,
-    containerName: HEADER.name,
-    xPosition: 0,
-    yPosition: 0,
-    width: DISPLAY_W,
-    height: HEADER_H,
-    content: currentTrack,
-    isEventCapture: 0,
-    borderWidth: 0,
-  })
-
-  const listItems = new ListItemContainerProperty({
-    itemCount: MENU_ITEMS.length,
-    itemWidth: DISPLAY_W - 16,
-    isItemSelectBorderEn: 1,
-    itemName: MENU_ITEMS.map(i => i.label),
-  })
-
-  const menuList = new ListContainerProperty({
-    containerID: MENU.id,
-    containerName: MENU.name,
-    xPosition: 0,
-    yPosition: HEADER_H,
-    width: DISPLAY_W,
-    height: LIST_H,
-    isEventCapture: 0,
-    borderWidth: 0,
-    paddingLength: 4,
-    itemContainer: listItems,
-  })
-
-  const volBar = new TextContainerProperty({
-    containerID: VOL.id,
-    containerName: VOL.name,
-    xPosition: 0,
-    yPosition: HEADER_H + LIST_H,
-    width: DISPLAY_W,
-    height: VOL_H,
-    content: buildVolumeBar(),
-    isEventCapture: 1,
-    borderWidth: 2,
-    borderColor: 13,
-    borderRdaius: 6,
+    isEventCapture: inVolumeMode ? 1 : 0,
+    borderWidth: inVolumeMode ? 2 : 0,
+    borderColor: inVolumeMode ? 13 : 0,
+    borderRdaius: inVolumeMode ? 6 : 0,
     paddingLength: 4,
   })
 
@@ -307,28 +246,15 @@ async function updateDisplay(bridge: EvenAppBridge) {
   lastMode = mode.type
 
   if (modeChanged) {
-    // Mode changed — must rebuild (different container types)
-    if (mode.type === 'menu') {
-      const page = buildMenuPage()
-      await bridge.rebuildPageContainer(
-        new RebuildPageContainer({
-          containerTotalNum: page.count,
-          textObject: page.textObject,
-          listObject: page.listObject,
-        })
-      )
-    } else {
-      const page = buildVolumePage()
-      await bridge.rebuildPageContainer(
-        new RebuildPageContainer({
-          containerTotalNum: page.count,
-          textObject: page.textObject,
-          listObject: page.listObject,
-        })
-      )
-    }
+    const page = buildPage(mode.type === 'volume')
+    await bridge.rebuildPageContainer(
+      new RebuildPageContainer({
+        containerTotalNum: page.count,
+        textObject: page.textObject,
+        listObject: page.listObject,
+      })
+    )
   } else {
-    // Same mode — update text containers in-place
     await bridge.textContainerUpgrade(
       new TextContainerUpgrade({
         containerID: HEADER.id,
@@ -378,8 +304,7 @@ async function main() {
     }
   })
 
-  // Initial page — menu mode with list container
-  const page = buildMenuPage()
+  const page = buildPage(false)
   await bridge.createStartUpPageContainer(
     new CreateStartUpPageContainer({
       containerTotalNum: page.count,
