@@ -13,12 +13,12 @@ Control Android media playback (Spotify, YouTube Music, etc.) from your Even Rea
 │  │  (WebView)        │ localhost  │  (Android App) │ │
 │  │                   │  :8765     │                │ │
 │  │  Shows UI on      │            │  Controls any  │ │
-│  │  glasses, gets    │  /play     │  active media  │ │
-│  │  tap events       │  /pause    │  session       │ │
-│  └──────────────────┘  /next     └───────────────┘ │
-│         ▲              /prev                         │
-│         │ BLE          /vol-up                       │
-│         ▼              /vol-down                     │
+│  │  glasses, gets    │/play-pause │  active media  │ │
+│  │  tap events       │  /next     │  session       │ │
+│  └──────────────────┘  /prev     └───────────────┘ │
+│         ▲              /vol-up                       │
+│         │ BLE          /vol-down                     │
+│         ▼              /status                       │
 │  ┌──────────────┐                                   │
 │  │  G2 Glasses   │                                   │
 │  └──────────────┘                                   │
@@ -31,12 +31,20 @@ Control Android media playback (Spotify, YouTube Music, etc.) from your Even Rea
 
 A web app that runs inside the Even Realities app WebView. Displays media info on the glasses and maps gestures to media commands.
 
-| Gesture | Action |
-|---------|--------|
-| Scroll | Navigate menu items |
-| Single tap | Activate selected item |
+#### UI Behavior
 
-Menu items: Play / Pause, Next Track, Prev Track, Volume (enters volume adjust mode).
+1. List: Play/Pause, Next Track, Prev Track, `[━━━━━━───] 53%`
+2. Scroll wraps around
+3. Scroll down = selection moves down
+4. Screen does not scroll as a whole
+5. Tap items 0-2 → send command (`play-pause`/`next`/`prev`)
+6. Tap item 3 (volume bar) → toggle volume adjust mode:
+   - Border appears around volume bar
+   - Scroll up/down → `vol-down`/`vol-up`
+   - Tap again → border removed, scroll works normally again
+7. Volume bar = full screen width (576px)
+8. Commands passed directly to Android bridge — no extra logic
+9. No extra features, no extra code beyond what is described above
 
 **Tech:** TypeScript + Vite + Even Hub SDK
 
